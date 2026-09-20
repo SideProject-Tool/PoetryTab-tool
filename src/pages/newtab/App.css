@@ -243,10 +243,6 @@
 }
 
 .board-grid {
-  display: grid;
-  grid-template-columns: repeat(var(--board-cols, 10), minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
   position: relative;
 }
 
@@ -279,8 +275,12 @@
 }
 
 .board-cell {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
+  transition: transform 250ms ease, width 250ms ease;
+  will-change: transform;
 }
 
 .board-cell.dragging-src {

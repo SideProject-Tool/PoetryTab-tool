@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
-import { SortableContext, useSortable, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import {
   IoAddOutline as AddIcon,
@@ -453,25 +453,51 @@ function FolderBrowser({ folderId, data, onClose }) {
 
 /* ---------- 可排序网格单元 + 拖拽浮层 ---------- */
 
-function SortableCell({ def, span, minH, children }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
-    useSortable({ id: def.id });
+function DraggableCell({ def, style, children }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: def.id });
   return (
     <div
       ref={setNodeRef}
       data-id={def.id}
       className={`board-cell ${isDragging ? "dragging-src" : ""}`}
-      style={{
-        gridColumn: `span ${span}`,
-        minHeight: minH,
-        transform: CSS.Transform.toString(transform),
-        transition,
-      }}
+      style={style}
     >
       {children({ ref: setActivatorNodeRef, props: { ...attributes, ...listeners } })}
       <span className="board-resize" title="拖动调整大小：横向改宽度，纵向改最小高度" />
     </div>
   );
+}
+
+/**
+ * 自由堆叠装箱：按数组顺序，每张卡落到「最低且最靠左」的空位——
+ * 矮卡片下方的留白会被后续卡片填上，实现完全自由堆叠。
+ * 高度 = max(实测内容高度, 拉伸设定的最小行数)。
+ */
+function packLayout(items, heights, cols, gridW) {
+  const colW = (gridW - (cols - 1) * GAP) / cols;
+  const pitchX = colW + GAP;
+  const colBottom = new Array(cols).fill(0);
+  const placed = [];
+  for (const it of items) {
+    const span = Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
+    const minHpx = it.h > 0 ? it.h * (ROW_H + GAP) - GAP : 0;
+    const hPx = Math.max(heights[it.i] || 160, minHpx);
+    let bestX = 0;
+    let bestY = Infinity;
+    for (let x = 0; x <= cols - span; x++) {
+      let bottom = 0;
+      for (let k = x; k < x + span; k++) bottom = Math.max(bottom, colBottom[k]);
+      if (bottom < bestY - 0.5) {
+        bestY = bottom;
+        bestX = x;
+      }
+    }
+    for (let x = bestX; x < bestX + span; x++) colBottom[x] = bestY + hPx + GAP;
+    placed.push({ i: it.i, x: Math.round(bestX * pitchX), y: Math.round(bestY), w: span, hPx });
+  }
+  let height = 0;
+  for (const b of colBottom) height = Math.max(height, b);
+  return { placed, height: Math.max(height - GAP, 0) };
 }
 
 function OverlayCard({ def, width }) {
@@ -529,9 +555,7 @@ export default function BookmarkBoard({ col }) {
 
   /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
      w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
-  /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
-     w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
-     卡片高度 = max(内容高度, h 行)——拉伸只抬高下限，内容永远完整展开不裁剪 */
+     展示位置由装箱算法按顺序推算（自由堆叠，无空洞）；卡片高度 = 实测内容高度与 h 行取大 */
   const derivedLayout = useMemo(() => {
     const stored = Array.isArray(data?.layout) ? data.layout : [];
     const wanted = new Map(widgetDefs.map((w) => [w.id, true]));
@@ -560,6 +584,8 @@ export default function BookmarkBoard({ col }) {
   const gridRef = useRef(null);
   const previewRef = useRef(null);
   const rafRef = useRef(0);
+  const activeIdRef = useRef(null);
+  const [heights, setHeights] = useState({}); // 卡片实测内容高度（px）
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
@@ -569,6 +595,29 @@ export default function BookmarkBoard({ col }) {
 
   const cols = colsForWidth(width || 1280);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  /* 自由堆叠：按顺序装箱出每张卡的位置（px）与容器总高 */
+  const packed = useMemo(
+    () => packLayout(items, heights, cols, width || 1280),
+    [items, heights, cols, width]
+  );
+  const posMap = useMemo(() => new Map(packed.placed.map((p) => [p.i, p])), [packed]);
+  const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
+
+  /* 渲染后实测卡片内容高度；变化则重新装箱（useLayoutEffect 保证首屏绘制前完成，无跳动） */
+  useLayoutEffect(() => {
+    const gridEl = gridRef.current;
+    if (!gridEl) return;
+    const next = {};
+    let changed = false;
+    gridEl.querySelectorAll(".board-cell").forEach((el) => {
+      const id = el.dataset.id;
+      const h = el.offsetHeight;
+      next[id] = h;
+      if (Math.abs((heights[id] || 0) - h) > 1) changed = true;
+    });
+    if (changed) setHeights(next);
+  });
 
   /* 拉伸手势挂在网格容器上（容器永不重排）：按住右下角把手，横向调宽度、纵向调最小高度。
      拖动排序交给 dnd-kit（跟手浮层 + 位移动画 + 自动滚屏） */
@@ -680,17 +729,25 @@ export default function BookmarkBoard({ col }) {
     [commitLayoutNow]
   );
 
-  /* dnd-kit：跨过哪张卡片就实时换位，松手落库 */
-  const onDragOver = useCallback(({ active, over }) => {
-    if (!over) return;
-    const a = String(active.id);
-    const o = String(over.id);
-    if (a === o) return;
+  /* dnd-kit 拖动中：指针落在哪张卡片上，就把拖动卡片插到它前面，装箱器随即重排 */
+  const onDragMove = useCallback(({ activatorEvent, delta }) => {
+    const ae = activatorEvent;
+    if (!ae || typeof ae.clientX !== "number" || !activeIdRef.current) return;
+    const px = ae.clientX + delta.x;
+    const py = ae.clientY + delta.y;
+    const el = document.elementFromPoint(px, py);
+    const cell = el && el.closest ? el.closest(".board-cell") : null;
+    if (!cell) return;
+    const a = activeIdRef.current;
+    const targetId = cell.dataset.id;
+    if (!targetId || targetId === a) return;
     setItems((prev) => {
       const from = prev.findIndex((p) => p.i === a);
-      const to = prev.findIndex((p) => p.i === o);
+      const to = prev.findIndex((p) => p.i === targetId);
       if (from < 0 || to < 0) return prev;
-      const next = arrayMove(prev, from, to);
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(next.findIndex((p) => p.i === targetId), 0, moved);
       if (next.every((p, i) => p.i === prev[i].i)) return prev;
       itemsRef.current = next;
       return next;
@@ -817,42 +874,56 @@ export default function BookmarkBoard({ col }) {
     <div className={`bookmark-board board-rgl ${gesturing ? "gesturing" : ""} ${activeId ? "dnd-active" : ""}`} ref={boardRef}>
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
         onDragStart={({ active }) => {
-          setActiveId(String(active.id));
+          const id = String(active.id);
+          activeIdRef.current = id;
+          setActiveId(id);
           setOverlayW(active.rect.current.initial?.width || 280);
         }}
-        onDragOver={onDragOver}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => setActiveId(null)}
+        onDragMove={onDragMove}
+        onDragEnd={() => {
+          activeIdRef.current = null;
+          setActiveId(null);
+          commitLayoutNow();
+        }}
+        onDragCancel={() => {
+          activeIdRef.current = null;
+          setActiveId(null);
+        }}
       >
-        <SortableContext items={items.map((p) => p.i)} strategy={rectSortingStrategy}>
-          <div
-            ref={gridRef}
-            className="board-grid"
-            style={{ "--board-cols": cols }}
-            onPointerDown={onGridPointerDown}
-            onPointerMove={onGridPointerMove}
-            onPointerUp={onGridPointerUp}
-            onPointerCancel={onGridPointerUp}
-          >
-            {items.map((it) => {
-              const def = defMap.get(it.i);
-              if (!def) return null;
-              const span = Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
-              const minH = it.h > 0 ? `${it.h * ROW_H + (it.h - 1) * GAP}px` : undefined;
-              return (
-                <SortableCell key={it.i} def={def} span={span} minH={minH}>
-                  {({ ref, props }) => renderWidgetBody(def, { ref, props })}
-                </SortableCell>
-              );
-            })}
-            {/* 拉伸时的吸附虚线预览框 */}
-            <div ref={previewRef} className="board-resize-preview">
-              <span className="board-resize-badge" />
-            </div>
+        <div
+          ref={gridRef}
+          className="board-grid"
+          style={{ height: packed.height }}
+          onPointerDown={onGridPointerDown}
+          onPointerMove={onGridPointerMove}
+          onPointerUp={onGridPointerUp}
+          onPointerCancel={onGridPointerUp}
+        >
+          {items.map((it) => {
+            const def = defMap.get(it.i);
+            const p = posMap.get(it.i);
+            if (!def || !p) return null;
+            const minH = it.h > 0 ? `${it.h * ROW_H + (it.h - 1) * GAP}px` : undefined;
+            return (
+              <DraggableCell
+                key={it.i}
+                def={def}
+                style={{
+                  width: p.w * colW + (p.w - 1) * GAP,
+                  minHeight: minH,
+                  transform: `translate(${p.x}px, ${p.y}px)`,
+                }}
+              >
+                {({ ref, props }) => renderWidgetBody(def, { ref, props })}
+              </DraggableCell>
+            );
+          })}
+          {/* 拉伸时的吸附虚线预览框 */}
+          <div ref={previewRef} className="board-resize-preview">
+            <span className="board-resize-badge" />
           </div>
-        </SortableContext>
+        </div>
         <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(0.2, 0, 1, 1)" }}>
           <OverlayCard def={overlayDef} width={overlayW} />
         </DragOverlay>
