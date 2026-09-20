@@ -809,6 +809,7 @@
 .pc-poem-wrap:hover #pc-poem { opacity: 0.75; }
 #pc-poem {
   max-width: min(86vw, 62ch);
+  margin: 0 auto;
   font-size: 1.7rem;
   line-height: 1.6;
   letter-spacing: 0.06em;
