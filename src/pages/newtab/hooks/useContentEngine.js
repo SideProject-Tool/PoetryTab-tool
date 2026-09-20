@@ -9,39 +9,12 @@ function formatContentForDisplay(content) {
   // 保留诗词完整原文（含标点），仅在展示时按标点对折换行
   return {
     ...content,
-    title: wrapPoemText(content.displayTitle || ""),
+    title: content.displayTitle || "",
     from: content.displaySource,
     who: content.displayAuthor,
   };
 }
 
-/** 长诗词按标点对折换行 */
-function wrapPoemText(t) {
-  t = (t || "").replace(/\r/g, "");
-  if (t.length <= 23 || t.indexOf("\n") >= 0) return t;
-  var marks = "，。；！？、：";
-  var parts = [];
-  var rest = t;
-  while (rest.length > 23) {
-    var mid = Math.ceil(rest.length / 2);
-    var best = -1;
-    var bestDist = 1e9;
-    for (var i = 0; i < rest.length; i++) {
-      if (marks.indexOf(rest[i]) >= 0) {
-        var d = Math.abs(i - mid);
-        if (d < bestDist) {
-          bestDist = d;
-          best = i;
-        }
-      }
-    }
-    if (best < 0) best = mid;
-    parts.push(rest.slice(0, best + 1));
-    rest = rest.slice(best + 1);
-  }
-  parts.push(rest);
-  return parts.join("\n");
-}
 
 function shuffle(arr) {
   const a = [...arr];

@@ -808,11 +808,13 @@
 }
 .pc-poem-wrap:hover #pc-poem { opacity: 0.75; }
 #pc-poem {
+  max-width: min(86vw, 62ch);
   font-size: 1.7rem;
   line-height: 1.6;
   letter-spacing: 0.06em;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 0.9;
   transition: opacity 0.25s;
 }

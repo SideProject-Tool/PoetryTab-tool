@@ -9,29 +9,6 @@ import { useContentEngine } from "./hooks/useContentEngine";
 import { flattenForSearch } from "./services/collection";
 import { SEARCH_ENGINES } from "./services/constants";
 
-/** 长诗词按标点对折折行（与网页版一致） */
-function wrapPoem(t) {
-  if (t.length <= 23) return t;
-  var parts = [];
-  var rest = t;
-  var marks = "，。；！？、：";
-  while (rest.length > 23) {
-    var mid = Math.ceil(rest.length / 2);
-    var best = -1;
-    var bestDist = 1e9;
-    for (var i = 0; i < rest.length; i++) {
-      if (marks.indexOf(rest[i]) >= 0) {
-        var d = Math.abs(i - mid);
-        if (d < bestDist) { bestDist = d; best = i; }
-      }
-    }
-    if (best < 0) best = mid;
-    parts.push(rest.slice(0, best + 1));
-    rest = rest.slice(best + 1);
-  }
-  parts.push(rest);
-  return parts.join("\n");
-}
 
 const THEME_NAMES = { light: "cupcake", dark: "halloween" };
 
@@ -109,7 +86,7 @@ export default function App() {
       {/* 诗词（点击换一首） */}
       <div className="pc-poem-wrap" onClick={rotatePoem} title="点一下换一首">
         <div id="pc-poem" className={poemFading ? "fading" : ""}>
-          {poem ? wrapPoem(poem.title) : ""}
+          {poem ? poem.title : ""}
         </div>
         <div className="pc-poem-hint">
           <span>— 点一下换一首 —</span>
