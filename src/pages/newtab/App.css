@@ -678,12 +678,6 @@
   border-top: 1px solid color-mix(in oklab, var(--color-base-content) 7%, transparent);
 }
 
-.board-add-width-btn.active {
-  background-color: oklch(var(--p) / 0.15);
-  border-color: oklch(var(--p) / 0.55);
-  color: oklch(var(--p) / 1);
-  font-weight: 600;
-}
 .bt-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
