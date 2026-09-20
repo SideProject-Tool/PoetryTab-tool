@@ -514,6 +514,38 @@ function effHeightPx(it, heights) {
   return Math.max(heights[it.i] || 0, it.h || 0);
 }
 
+/** 重力整理：纵向重叠或间距小于 GAP 的卡片，自动下推到恰好 GAP（14px），与左右间距一致 */
+function settleLayout(items, heights, cols, colW) {
+  const infos = items.map((it) => {
+    const span = viewSpan(it, cols);
+    const vx = viewX(it, cols);
+    const hPx = Math.max(effHeightPx(it, heights), it.h || 0);
+    return { ...it, vx, span, hPx };
+  });
+  infos.sort((a, b) => a.y - b.y || a.vx - b.vx);
+  for (let pass = 0; pass < 8; pass++) {
+    let moved = false;
+    for (let i = 0; i < infos.length; i++) {
+      const a = infos[i];
+      let y = a.y;
+      for (let j = 0; j < infos.length; j++) {
+        if (j === i) continue;
+        const o = infos[j];
+        const xOverlap = a.vx < o.vx + o.span && o.vx < a.vx + a.span;
+        if (!xOverlap) continue;
+        // o 在 a 上方且底边侵入 a 的顶部间隙 → 下推 a
+        if (o.y <= y && y < o.y + o.hPx + GAP) y = o.y + o.hPx + GAP;
+      }
+      if (y !== a.y) {
+        a.y = y;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return infos.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
+}
+
 /** 拖放落点的防重叠：被占则逐行下移到首个空位 */
 function resolveDropY(candX, candY, span, draggedH, draggedId, items, heights, cols, colW) {
   let y = Math.max(0, candY);
@@ -587,6 +619,10 @@ export default function BookmarkBoard({ col }) {
   }, [folders, iframeWidgets]);
   const defMap = useMemo(() => new Map(widgetDefs.map((d) => [d.id, d])), [widgetDefs]);
 
+  const cols = colsForWidth(width || 1280);
+  const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
+  const [heights, setHeights] = useState({}); // 卡片实测内容高度（px）
+
   /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
      w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
      展示位置由装箱算法按顺序推算（自由堆叠，无空洞）；卡片高度 = 实测内容高度与 h 行取大 */
@@ -616,8 +652,9 @@ export default function BookmarkBoard({ col }) {
     if (needPlace.length) {
       for (const p of packColumns(needPlace, REF_COLS, known)) known.push(p);
     }
-    return known;
-  }, [data?.layout, widgetDefs]);
+    // 重力整理：保证纵向最小间距
+    return settleLayout(known, heights, cols, colW);
+  }, [data?.layout, widgetDefs, heights, cols, colW]);
 
   /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
   const [items, setItems] = useState(derivedLayout);
@@ -632,7 +669,6 @@ export default function BookmarkBoard({ col }) {
   const dragGeomRef = useRef(null); // 拖动抓取几何
   const rafRef = useRef(0);
   const activeIdRef = useRef(null);
-  const [heights, setHeights] = useState({}); // 卡片实测内容高度（px）
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
@@ -640,10 +676,7 @@ export default function BookmarkBoard({ col }) {
     if (!gesturing && !activeId) setItems(derivedLayout);
   }, [derivedLayout, gesturing, activeId]);
 
-  const cols = colsForWidth(width || 1280);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
 
   /* 每张卡的渲染几何：显式坐标 + 实测内容高度 */
   const posMap = useMemo(() => {
@@ -797,12 +830,13 @@ export default function BookmarkBoard({ col }) {
         /* 指针已释放时忽略 */
       }
       setGesturing(false);
-      // 一次性落位：此时才重排网格
-      itemsRef.current = g.cur;
-      setItems(g.cur);
+      // 一次性落位：重力整理后回写
+      const settled = settleLayout(g.cur, heights, cols, colW);
+      itemsRef.current = settled;
+      setItems(settled);
       commitLayoutNow();
     },
-    [commitLayoutNow]
+    [commitLayoutNow, heights, cols, colW]
   );
 
   /* dnd-kit 拖动中：按「抓取偏移 + 指针位置」直接推算目标网格坐标（GridStack 模式），
@@ -855,11 +889,12 @@ export default function BookmarkBoard({ col }) {
             }
           : p
       );
-      itemsRef.current = next;
-      setItems(next);
+      const settled = settleLayout(next, heights, cols, colW);
+      itemsRef.current = settled;
+      setItems(settled);
     }
     commitLayoutNow();
-  }, [cols, commitLayoutNow]);
+  }, [cols, heights, colW, commitLayoutNow]);
 
   const submitNewGroup = () => {
     if (!newGroup.trim()) return;
