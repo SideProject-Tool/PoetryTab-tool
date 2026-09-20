@@ -641,7 +641,8 @@ export default function BookmarkBoard({ col }) {
     }
     // 新卡片 / 旧格式数据：自动装箱补位
     if (needPlace.length) {
-      for (const p of packColumns(needPlace, REF_COLS, known)) known.push(p);
+      // packColumns 的 y 以行计，这里换算为像素（行高 90px）
+      for (const p of packColumns(needPlace, REF_COLS, known)) known.push({ ...p, y: Math.round(p.y * 90) });
     }
     return known;
   }, [data?.layout, widgetDefs]);
