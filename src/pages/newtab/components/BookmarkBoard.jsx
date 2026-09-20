@@ -468,36 +468,72 @@ function DraggableCell({ def, style, children }) {
   );
 }
 
-/**
- * 自由堆叠装箱：按数组顺序，每张卡落到「最低且最靠左」的空位——
- * 矮卡片下方的留白会被后续卡片填上，实现完全自由堆叠。
- * 高度 = max(实测内容高度, 拉伸设定的最小行数)。
+/*
+ * 坐标模型：每张卡存显式位置 { x: 参考列, y: 行, w: 跨度, h: 最小行 }，指哪放哪、允许留白。
+ * packColumns 仅用于两处：老数据（无 x/y）迁移补位、新建卡片的初始落位。
  */
-function packLayout(items, heights, cols, gridW) {
-  const colW = (gridW - (cols - 1) * GAP) / cols;
-  const pitchX = colW + GAP;
+
+function packColumns(items, cols, obstacles = []) {
   const colBottom = new Array(cols).fill(0);
+  for (const o of obstacles) {
+    const ospan = Math.max(1, Math.min(cols, o.w));
+    const orows = o.h > 0 ? o.h : 2;
+    for (let x = o.x; x < Math.min(o.x + ospan, cols); x++) {
+      colBottom[x] = Math.max(colBottom[x], o.y + orows);
+    }
+  }
   const placed = [];
   for (const it of items) {
-    const span = Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
-    const minHpx = it.h > 0 ? it.h * (ROW_H + GAP) - GAP : 0;
-    const hPx = Math.max(heights[it.i] || 160, minHpx);
+    const span = Math.max(1, Math.min(cols, it.w));
+    const rows = it.h > 0 ? it.h : 2;
     let bestX = 0;
     let bestY = Infinity;
     for (let x = 0; x <= cols - span; x++) {
-      let bottom = 0;
-      for (let k = x; k < x + span; k++) bottom = Math.max(bottom, colBottom[k]);
-      if (bottom < bestY - 0.5) {
-        bestY = bottom;
+      let b = 0;
+      for (let k = x; k < x + span; k++) b = Math.max(b, colBottom[k]);
+      if (b < bestY - 0.5) {
+        bestY = b;
         bestX = x;
       }
     }
-    for (let x = bestX; x < bestX + span; x++) colBottom[x] = bestY + hPx + GAP;
-    placed.push({ i: it.i, x: Math.round(bestX * pitchX), y: Math.round(bestY), w: span, hPx });
+    for (let k = bestX; k < bestX + span; k++) colBottom[k] = bestY + rows;
+    placed.push({ i: it.i, x: bestX, y: bestY, w: span, h: it.h });
   }
-  let height = 0;
-  for (const b of colBottom) height = Math.max(height, b);
-  return { placed, height: Math.max(height - GAP, 0) };
+  return placed;
+}
+
+function viewSpan(it, cols) {
+  return Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
+}
+
+function viewX(it, cols) {
+  return Math.max(0, Math.min(cols - viewSpan(it, cols), Math.round((it.x * cols) / REF_COLS)));
+}
+
+function effHeightPx(it, heights) {
+  const minHpx = it.h > 0 ? it.h * (ROW_H + GAP) - GAP : 0;
+  return Math.max(heights[it.i] || 160, minHpx);
+}
+
+/** 拖放落点的防重叠：被占则逐行下移到首个空位 */
+function resolveDropY(candX, candY, span, draggedId, items, heights, cols) {
+  const pitch = ROW_H + GAP;
+  let y = Math.max(0, candY);
+  for (let guard = 0; guard < 60; guard++) {
+    const hit = items.find((o) => {
+      if (o.i === draggedId) return false;
+      const ovx = viewX(o, cols);
+      const ospan = viewSpan(o, cols);
+      const oh = effHeightPx(o, heights);
+      const oy = o.y * pitch;
+      const xOverlap = candX < ovx + ospan && ovx < candX + span;
+      const yOverlap = y * pitch < oy + oh && oy < y * pitch + Math.max(pitch, 20);
+      return xOverlap && yOverlap;
+    });
+    if (!hit) break;
+    y = hit.y + Math.ceil(effHeightPx(hit, heights) / pitch);
+  }
+  return y;
 }
 
 function OverlayCard({ def, width }) {
@@ -559,19 +595,28 @@ export default function BookmarkBoard({ col }) {
   const derivedLayout = useMemo(() => {
     const stored = Array.isArray(data?.layout) ? data.layout : [];
     const wanted = new Map(widgetDefs.map((w) => [w.id, true]));
-    const out = [];
+    const known = [];
+    const needPlace = [];
     const seen = new Set();
     for (const e of stored) {
       if (!wanted.has(e.i) || seen.has(e.i)) continue;
       const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
       const h = Math.max(0, Math.round(e.h || 0));
-      out.push({ i: e.i, w, h });
+      if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
+        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y)), w, h });
+      } else {
+        needPlace.push({ i: e.i, w, h });
+      }
       seen.add(e.i);
     }
     for (const wd of widgetDefs) {
-      if (!seen.has(wd.id)) out.push({ i: wd.id, w: defaultWidth(wd.id), h: 0 });
+      if (!seen.has(wd.id)) needPlace.push({ i: wd.id, w: defaultWidth(wd.id), h: 0 });
     }
-    return out;
+    // 新卡片 / 旧格式数据：自动装箱补位
+    if (needPlace.length) {
+      for (const p of packColumns(needPlace, REF_COLS, known)) known.push(p);
+    }
+    return known;
   }, [data?.layout, widgetDefs]);
 
   /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
@@ -583,6 +628,8 @@ export default function BookmarkBoard({ col }) {
   const gestureRef = useRef(null); // {id, it, startX, startY, cur, ...预览几何}（仅拉伸）
   const gridRef = useRef(null);
   const previewRef = useRef(null);
+  const candidateRef = useRef(null); // 拖动落点候选（vx 列, y 行）
+  const dragGeomRef = useRef(null); // 拖动抓取几何
   const rafRef = useRef(0);
   const activeIdRef = useRef(null);
   const [heights, setHeights] = useState({}); // 卡片实测内容高度（px）
@@ -596,15 +643,30 @@ export default function BookmarkBoard({ col }) {
   const cols = colsForWidth(width || 1280);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  /* 自由堆叠：按顺序装箱出每张卡的位置（px）与容器总高 */
-  const packed = useMemo(
-    () => packLayout(items, heights, cols, width || 1280),
-    [items, heights, cols, width]
-  );
-  const posMap = useMemo(() => new Map(packed.placed.map((p) => [p.i, p])), [packed]);
   const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
+  const pitchY = ROW_H + GAP;
 
-  /* 渲染后实测卡片内容高度；变化则重新装箱（useLayoutEffect 保证首屏绘制前完成，无跳动） */
+  /* 每张卡的渲染几何：显式坐标 + 实测内容高度 */
+  const posMap = useMemo(() => {
+    const m = new Map();
+    for (const it of items) {
+      m.set(it.i, {
+        x: viewX(it, cols) * (colW + GAP),
+        y: it.y * pitchY,
+        w: viewSpan(it, cols),
+        hPx: effHeightPx(it, heights),
+      });
+    }
+    return m;
+  }, [items, cols, colW, heights]);
+
+  const containerHeight = useMemo(() => {
+    let m = 0;
+    for (const p of posMap.values()) m = Math.max(m, p.y + p.hPx);
+    return m;
+  }, [posMap]);
+
+  /* 渲染后实测卡片内容高度；变化则更新（拖放防重叠依赖它） */
   useLayoutEffect(() => {
     const gridEl = gridRef.current;
     if (!gridEl) return;
@@ -619,19 +681,34 @@ export default function BookmarkBoard({ col }) {
     if (changed) setHeights(next);
   });
 
-  /* 拉伸手势挂在网格容器上（容器永不重排）：按住右下角把手，横向调宽度、纵向调最小高度。
-     拖动排序交给 dnd-kit（跟手浮层 + 位移动画 + 自动滚屏） */
+  /* 拉伸手势挂在网格容器上：按住右下角把手，横向调宽度、纵向调最小高度。
+     拖动排序交给 dnd-kit；按下时记录抓取几何，供拖动落点推算 */
   const onGridPointerDown = useCallback(
     (e) => {
       if (gestureRef.current || e.button > 0) return;
-      if (!e.target.closest(".board-resize")) return;
       const cellEl = e.target.closest(".board-cell");
       if (!cellEl) return;
+      const gridEl = gridRef.current;
+      if (!gridEl) return;
+      // 记录抓取几何（拖动排序落点推算依据：指针相对卡片左上角的偏移 + 网格原点/列宽）
+      const gid = cellEl.dataset.id;
+      if (gid && itemsRef.current.some((p) => p.i === gid)) {
+        const gridRect = gridEl.getBoundingClientRect();
+        const cardRect = cellEl.getBoundingClientRect();
+        const colW2 = (gridRect.width - (cols - 1) * GAP) / cols;
+        dragGeomRef.current = {
+          gridLeft: gridRect.left,
+          gridTop: gridRect.top,
+          grabDX: e.clientX - cardRect.left,
+          grabDY: e.clientY - cardRect.top,
+          colW: colW2,
+          pitchX: colW2 + GAP,
+        };
+      }
+      if (!e.target.closest(".board-resize")) return;
       const id = cellEl.dataset.id;
       const it = itemsRef.current.find((p) => p.i === id);
       if (!it) return;
-      const gridEl = gridRef.current;
-      if (!gridEl) return;
       e.preventDefault();
       const gridRect = gridEl.getBoundingClientRect();
       const cardRect = cellEl.getBoundingClientRect();
@@ -666,7 +743,7 @@ export default function BookmarkBoard({ col }) {
       setGesturing(true);
       e.currentTarget.setPointerCapture(e.pointerId);
     },
-    []
+    [cols]
   );
 
   const onGridPointerMove = useCallback(
@@ -701,7 +778,7 @@ export default function BookmarkBoard({ col }) {
   );
 
   const commitLayoutNow = useCallback(() => {
-    col.setLayout(itemsRef.current.map((p) => ({ i: p.i, w: p.w, h: p.h })));
+    col.setLayout(itemsRef.current.map((p) => ({ i: p.i, x: p.x, y: p.y, w: p.w, h: p.h })));
   }, [col]);
 
   const onGridPointerUp = useCallback(
@@ -729,35 +806,60 @@ export default function BookmarkBoard({ col }) {
     [commitLayoutNow]
   );
 
-  /* dnd-kit 拖动中：指针落在哪张卡片上，就把拖动卡片插到它前面，装箱器随即重排 */
-  const onDragMove = useCallback(({ activatorEvent, delta }) => {
-    const ae = activatorEvent;
-    if (!ae || typeof ae.clientX !== "number" || !activeIdRef.current) return;
-    const px = ae.clientX + delta.x;
-    const py = ae.clientY + delta.y;
-    const el = document.elementFromPoint(px, py);
-    const cell = el && el.closest ? el.closest(".board-cell") : null;
-    if (!cell) return;
-    const a = activeIdRef.current;
-    const targetId = cell.dataset.id;
-    if (!targetId || targetId === a) return;
-    setItems((prev) => {
-      const from = prev.findIndex((p) => p.i === a);
-      const to = prev.findIndex((p) => p.i === targetId);
-      if (from < 0 || to < 0) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(next.findIndex((p) => p.i === targetId), 0, moved);
-      if (next.every((p, i) => p.i === prev[i].i)) return prev;
-      itemsRef.current = next;
-      return next;
-    });
-  }, []);
+  /* dnd-kit 拖动中：按「抓取偏移 + 指针位置」直接推算目标网格坐标（GridStack 模式），
+     虚线预览实时跟随；纯几何计算，不做 DOM 命中查询 */
+  const onDragMove = useCallback(
+    ({ activatorEvent, delta }) => {
+      const g = dragGeomRef.current;
+      const a = activeIdRef.current;
+      const dragged = itemsRef.current.find((p) => p.i === a);
+      const ae = activatorEvent;
+      if (!g || !a || !dragged || !ae || typeof ae.clientX !== "number") return;
+      const span = viewSpan(dragged, cols);
+      const px = ae.clientX + delta.x;
+      const py = ae.clientY + delta.y;
+      const col = Math.max(0, Math.min(cols - span, Math.round((px - g.grabDX - g.gridLeft) / g.pitchX)));
+      const row = Math.max(0, Math.round((py - g.grabDY - g.gridTop) / pitchY));
+      const y = resolveDropY(col, row, span, a, itemsRef.current, heights, cols);
+      candidateRef.current = { vx: col, y };
+      // 虚线落点预览（直接改样式，零重渲染）
+      const pv = previewRef.current;
+      if (pv) {
+        pv.classList.add("active");
+        pv.style.left = col * g.pitchX + "px";
+        pv.style.top = y * pitchY + "px";
+        pv.style.width = span * g.colW + (span - 1) * GAP + "px";
+        pv.style.height = effHeightPx(dragged, heights) + "px";
+        const badge = pv.querySelector(".board-resize-badge");
+        if (badge) badge.textContent = "松开落到 " + (col + 1) + " 列 " + (y + 1) + " 行";
+      }
+    },
+    [cols, heights, pitchY]
+  );
 
   const onDragEnd = useCallback(() => {
+    const a = activeIdRef.current;
+    const cand = candidateRef.current;
+    activeIdRef.current = null;
+    candidateRef.current = null;
+    const pv = previewRef.current;
+    if (pv) pv.classList.remove("active");
     setActiveId(null);
+    if (a && cand) {
+      const next = itemsRef.current.map((p) =>
+        p.i === a
+          ? {
+              ...p,
+              x: Math.max(0, Math.min(REF_COLS - p.w, Math.round((cand.vx * REF_COLS) / cols))),
+              y: cand.y,
+            }
+          : p
+      );
+      itemsRef.current = next;
+      setItems(next);
+    }
     commitLayoutNow();
-  }, [commitLayoutNow]);
+  }, [cols, commitLayoutNow]);
 
   const submitNewGroup = () => {
     if (!newGroup.trim()) return;
@@ -881,20 +983,19 @@ export default function BookmarkBoard({ col }) {
           setOverlayW(active.rect.current.initial?.width || 280);
         }}
         onDragMove={onDragMove}
-        onDragEnd={() => {
-          activeIdRef.current = null;
-          setActiveId(null);
-          commitLayoutNow();
-        }}
+        onDragEnd={onDragEnd}
         onDragCancel={() => {
           activeIdRef.current = null;
+          candidateRef.current = null;
+          const pv = previewRef.current;
+          if (pv) pv.classList.remove("active");
           setActiveId(null);
         }}
       >
         <div
           ref={gridRef}
           className="board-grid"
-          style={{ height: packed.height }}
+          style={{ height: containerHeight }}
           onPointerDown={onGridPointerDown}
           onPointerMove={onGridPointerMove}
           onPointerUp={onGridPointerUp}
