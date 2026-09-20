@@ -27,8 +27,8 @@ import { colsForWidth, REF_COLS } from "../grid";
  * - 每张卡片右上角 ⋯ 管理面板；所有修改防抖自动保存回云端
  */
 
-const ROW_H = 76; /* 拉伸的最小高度单位（像素），跨设备一致 */
-const GAP = 14;
+const GAP = 14; /* 卡片四周间隙：上下与左右一致 */
+const LEGACY_ROW_PX = 90; /* 旧版行单位换算（历史数据迁移用） */
 
 const PALETTE = [
   "#c96f5e", "#7b9e56", "#5e89c9", "#b0785e", "#8a6fc9", "#c95e8a", "#5eb0a5", "#c9a35e",
@@ -511,13 +511,11 @@ function viewX(it, cols) {
 }
 
 function effHeightPx(it, heights) {
-  const minHpx = it.h > 0 ? it.h * (ROW_H + GAP) - GAP : 0;
-  return Math.max(heights[it.i] || 160, minHpx);
+  return Math.max(heights[it.i] || 0, it.h || 0);
 }
 
 /** 拖放落点的防重叠：被占则逐行下移到首个空位 */
-function resolveDropY(candX, candY, span, draggedId, items, heights, cols) {
-  const pitch = ROW_H + GAP;
+function resolveDropY(candX, candY, span, draggedH, draggedId, items, heights, cols, colW) {
   let y = Math.max(0, candY);
   for (let guard = 0; guard < 60; guard++) {
     const hit = items.find((o) => {
@@ -525,13 +523,13 @@ function resolveDropY(candX, candY, span, draggedId, items, heights, cols) {
       const ovx = viewX(o, cols);
       const ospan = viewSpan(o, cols);
       const oh = effHeightPx(o, heights);
-      const oy = o.y * pitch;
+      const oy = o.y;
       const xOverlap = candX < ovx + ospan && ovx < candX + span;
-      const yOverlap = y * pitch < oy + oh && oy < y * pitch + Math.max(pitch, 20);
+      const yOverlap = y < oy + oh && oy < y + draggedH;
       return xOverlap && yOverlap;
     });
     if (!hit) break;
-    y = hit.y + Math.ceil(effHeightPx(hit, heights) / pitch);
+    y = hit.y + effHeightPx(hit, heights) + GAP;
   }
   return y;
 }
@@ -601,9 +599,10 @@ export default function BookmarkBoard({ col }) {
     for (const e of stored) {
       if (!wanted.has(e.i) || seen.has(e.i)) continue;
       const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
-      const h = Math.max(0, Math.round(e.h || 0));
+      const legacy = Number.isFinite(e.y) && e.y > 0 && e.y < 50; // 旧行单位检测
+      const h = Math.max(0, Math.round((e.h || 0) * (legacy ? LEGACY_ROW_PX : 1)));
       if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
-        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y)), w, h });
+        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y * (legacy ? LEGACY_ROW_PX : 1))), w, h });
       } else {
         needPlace.push({ i: e.i, w, h });
       }
@@ -644,7 +643,6 @@ export default function BookmarkBoard({ col }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
-  const pitchY = ROW_H + GAP;
 
   /* 每张卡的渲染几何：显式坐标 + 实测内容高度 */
   const posMap = useMemo(() => {
@@ -652,7 +650,7 @@ export default function BookmarkBoard({ col }) {
     for (const it of items) {
       m.set(it.i, {
         x: viewX(it, cols) * (colW + GAP),
-        y: it.y * pitchY,
+        y: it.y,
         w: viewSpan(it, cols),
         hPx: effHeightPx(it, heights),
       });
@@ -759,14 +757,14 @@ export default function BookmarkBoard({ col }) {
         const ncols = colsForWidth(gg.gridW);
         const unitX = gg.gridW / REF_COLS;
         const dw = Math.max(1, Math.min(REF_COLS, Math.round(gg.it.w + (cx - gg.startX) / unitX)));
-        const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY) / (ROW_H + GAP)));
+        const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY)));
         const span = Math.max(1, Math.min(ncols, Math.round((dw * ncols) / REF_COLS)));
         gg.cur = gg.cur.map((p) => (p.i === gg.id ? { ...p, w: dw, h: dh } : p));
         // 虚线预览框直接改样式（零重渲染），吸附列/行
         const pv = previewRef.current;
         if (pv) {
           const w = span * gg.colW + (span - 1) * GAP;
-          const h = Math.max(gg.contentH, dh > 0 ? dh * (ROW_H + GAP) - GAP : 0);
+          const h = Math.max(gg.contentH, dh);
           pv.style.width = w + "px";
           pv.style.height = h + "px";
           const badge = pv.querySelector(".board-resize-badge");
@@ -816,25 +814,26 @@ export default function BookmarkBoard({ col }) {
       const ae = activatorEvent;
       if (!g || !a || !dragged || !ae || typeof ae.clientX !== "number") return;
       const span = viewSpan(dragged, cols);
+      const draggedH = effHeightPx(dragged, heights);
       const px = ae.clientX + delta.x;
       const py = ae.clientY + delta.y;
       const col = Math.max(0, Math.min(cols - span, Math.round((px - g.grabDX - g.gridLeft) / g.pitchX)));
-      const row = Math.max(0, Math.round((py - g.grabDY - g.gridTop) / pitchY));
-      const y = resolveDropY(col, row, span, a, itemsRef.current, heights, cols);
-      candidateRef.current = { vx: col, y };
+      const y = Math.max(0, Math.round(py - g.grabDY - g.gridTop));
+      const resolvedY = resolveDropY(col, y, span, draggedH, a, itemsRef.current, heights, cols, colW);
+      candidateRef.current = { vx: col, y: resolvedY };
       // 虚线落点预览（直接改样式，零重渲染）
       const pv = previewRef.current;
       if (pv) {
         pv.classList.add("active");
         pv.style.left = col * g.pitchX + "px";
-        pv.style.top = y * pitchY + "px";
+        pv.style.top = resolvedY + "px";
         pv.style.width = span * g.colW + (span - 1) * GAP + "px";
-        pv.style.height = effHeightPx(dragged, heights) + "px";
+        pv.style.height = draggedH + "px";
         const badge = pv.querySelector(".board-resize-badge");
-        if (badge) badge.textContent = "松开落到 " + (col + 1) + " 列 " + (y + 1) + " 行";
+        if (badge) badge.textContent = "松开落到 " + (col + 1) + " 列";
       }
     },
-    [cols, heights, pitchY]
+    [cols, heights, colW]
   );
 
   const onDragEnd = useCallback(() => {
@@ -1005,7 +1004,7 @@ export default function BookmarkBoard({ col }) {
             const def = defMap.get(it.i);
             const p = posMap.get(it.i);
             if (!def || !p) return null;
-            const minH = it.h > 0 ? `${it.h * ROW_H + (it.h - 1) * GAP}px` : undefined;
+            const minH = it.h > 0 ? `${it.h}px` : undefined;
             return (
               <DraggableCell
                 key={it.i}
