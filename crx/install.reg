@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+; Poetry-Tab 扩展强制安装策略（Chrome + Edge）
+; 导入后 Chrome 和 Edge 将自动安装并保持 Poetry-Tab 扩展
+; 数据通过用户 ID 云同步，与本地文件无关
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist]
+"1"="omhimmpdocmphahpogiglgkffpememhb;https://sync.pathmemos.com/crx/updates.xml"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist]
+"1"="omhimmpdocmphahpogiglgkffpememhb;https://sync.pathmemos.com/crx/updates.xml"
