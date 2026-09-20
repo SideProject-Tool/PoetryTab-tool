@@ -17,9 +17,9 @@
 
 .settings-container {
   position: fixed;
-  bottom: 1.5rem;
-  left: 1.5rem;
-  z-index: 100;
+  top: 1.1rem;
+  right: 4.4rem;
+  z-index: 500;
 }
 
 .search-toggle {
@@ -69,8 +69,8 @@
 
 .settings-popover {
   position: absolute;
-  bottom: calc(100% + 0.75rem);
-  left: 0;
+  top: calc(100% + 0.75rem);
+  right: 0;
   min-width: 21rem;
   padding: 0.5rem;
   border-radius: 1rem;

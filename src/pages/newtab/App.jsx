@@ -144,7 +144,7 @@ export default function App() {
         <BookmarkBoard col={col} />
       </div>
 
-      {/* 设置面板（左下角 ⚙） */}
+      {/* 设置面板（右上角 ⚙，与搜索按钮并排） */}
       <SettingsPanel col={col} />
     </div>
   );
