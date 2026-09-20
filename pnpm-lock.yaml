@@ -36,18 +36,12 @@ importers:
       '@wxt-dev/module-react':
         specifier: ^1.1.5
         version: 1.1.5(vite@7.3.1(@types/node@25.2.1)(jiti@2.6.1)(lightningcss@1.33.0)(yaml@2.7.0))(wxt@0.20.13(@types/node@25.2.1)(jiti@2.6.1)(lightningcss@1.33.0)(rollup@4.57.1)(yaml@2.7.0))
-      animate.css:
-        specifier: ^4.1.1
-        version: 4.1.1
       cn-font-split:
         specifier: ^7.4.1
         version: 7.4.1
       daisyui:
         specifier: ^5.5.18
         version: 5.5.18
-      driver.js:
-        specifier: ^1.4.0
-        version: 1.4.0
       postcss:
         specifier: ^8.5.6
         version: 8.5.6
@@ -762,9 +756,6 @@ packages:
     resolution: {integrity: sha512-TGw5yVi4saajsSEgz25grObGHEUaDrniwvA2qwSC060KfqGPdglhvPMA2lPIoxs3PQIItj2iag35fONcQqgUaQ==}
     engines: {node: '>=12.0'}
 
-  animate.css@4.1.1:
-    resolution: {integrity: sha512-+mRmCTv6SbCmtYJCN4faJMNFVNN5EuCTTprDTAo7YzIGji2KADmakjVA3+8mVDkZ2Bf09vayB35lSQIex2+QaQ==}
-
   ansi-align@3.0.1:
     resolution: {integrity: sha512-IOfwwBF5iczOjp/WeY4YxyjqAFMQoZufdQWDd19SEExbVLNXqvpzSJ/M7Za4/sCPmQ0+GRquoA7bGcINcxew6w==}
 
@@ -1082,9 +1073,6 @@ packages:
   dotenv@17.2.4:
     resolution: {integrity: sha512-mudtfb4zRB4bVvdj0xRo+e6duH1csJRM8IukBqfTRvHotn9+LBXB8ynAidP9zHqoRC/fsllXgk4kCKlR21fIhw==}
     engines: {node: '>=12'}
-
-  driver.js@1.4.0:
-    resolution: {integrity: sha512-Gm64jm6PmcU+si21sQhBrTAM1JvUrR0QhNmjkprNLxohOBzul9+pNHXgQaT9lW84gwg9GMLB3NZGuGolsz5uew==}
 
   electron-to-chromium@1.5.286:
     resolution: {integrity: sha512-9tfDXhJ4RKFNerfjdCcZfufu49vg620741MNs26a9+bhLThdB+plgMeou98CAaHu/WATj2iHOOHTp1hWtABj2A==}
@@ -2864,8 +2852,6 @@ snapshots:
 
   adm-zip@0.5.16: {}
 
-  animate.css@4.1.1: {}
-
   ansi-align@3.0.1:
     dependencies:
       string-width: 4.2.3
@@ -3158,8 +3144,6 @@ snapshots:
   dotenv@16.6.1: {}
 
   dotenv@17.2.4: {}
-
-  driver.js@1.4.0: {}
 
   electron-to-chromium@1.5.286: {}
 

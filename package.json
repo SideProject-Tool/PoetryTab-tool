@@ -1,6 +1,6 @@
 {
-  "name": "oneiro",
-  "description": "Oneiro - A Chrome extension for new tab with Chinese poems and bookmarks",
+  "name": "proton-collect",
+  "description": "Proton Collect - 新标签页：古诗词 · 收藏看板 · 云同步（Chrome 扩展 + 网页版）",
   "version": "2.4.1",
   "scripts": {
     "pre": "wxt prepare",
@@ -8,7 +8,6 @@
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
-    "build:safari": "wxt build -b safari && xcrun /Applications/Xcode.app/Contents/Developer/usr/bin/safari-web-extension-converter --bundle-identifier com.github.xxnuo.jizhi-mod --project-location .output/safari-xcode .output/safari-mv2",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "zip:all": "wxt zip && wxt zip -b firefox && wxt zip -b edge",
@@ -22,10 +21,8 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "@wxt-dev/module-react": "^1.1.5",
-    "animate.css": "^4.1.1",
     "cn-font-split": "^7.4.1",
     "daisyui": "^5.5.18",
-    "driver.js": "^1.4.0",
     "postcss": "^8.5.6",
     "prettier": "^3.8.1",
     "react": "^19.2.4",
@@ -43,5 +40,16 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2"
-  }
+  },
+  "author": "startnewlabs",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/startnewlabs/SP-poetrytab.git"
+  },
+  "bugs": {
+    "url": "https://github.com/startnewlabs/SP-poetrytab/issues"
+  },
+  "homepage": "https://sync.pathmemos.com"
 }

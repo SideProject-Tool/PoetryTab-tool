@@ -12,7 +12,7 @@ export default defineConfig({
   manifest: {
     permissions: [],
     host_permissions: ["https://sync.pathmemos.com/*"],
-    author: "xxnuo",
+    author: "startnewlabs",
     name: "Proton Collect",
     description: "Proton Collect - 在新标签页上展示中国经典诗词和收藏夹书签。",
     action: {
