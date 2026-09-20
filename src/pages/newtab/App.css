@@ -543,16 +543,17 @@
 
 .board-iframe-body {
   flex: 1 1 auto;
-  min-height: clamp(320px, 62vh, 780px);
+  min-height: 200px;
   display: flex;
   background-color: color-mix(in oklab, var(--color-base-200) 35%, transparent);
 }
 
 .board-iframe {
   display: block;
+  flex: 1 1 auto;
   width: 100%;
-  height: 100%;
-  min-height: clamp(320px, 62vh, 780px);
+  height: auto;
+  min-height: 200px;
   border: none;
 }
 

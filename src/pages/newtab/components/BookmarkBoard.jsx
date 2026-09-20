@@ -600,7 +600,8 @@ export default function BookmarkBoard({ col }) {
       if (!wanted.has(e.i) || seen.has(e.i)) continue;
       const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
       const legacy = Number.isFinite(e.y) && e.y > 0 && e.y < 50; // 旧行单位检测
-      const h = Math.max(0, Math.round((e.h || 0) * (legacy ? LEGACY_ROW_PX : 1)));
+      let h = Math.max(0, Math.round((e.h || 0) * (legacy ? LEGACY_ROW_PX : 1)));
+      if (e.i.startsWith("w:") && h < 200) h = 480; // iframe 卡保底可用内嵌高度
       if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
         known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y * (legacy ? LEGACY_ROW_PX : 1))), w, h });
       } else {
@@ -609,7 +610,7 @@ export default function BookmarkBoard({ col }) {
       seen.add(e.i);
     }
     for (const wd of widgetDefs) {
-      if (!seen.has(wd.id)) needPlace.push({ i: wd.id, w: defaultWidth(wd.id), h: 0 });
+      if (!seen.has(wd.id)) needPlace.push({ i: wd.id, w: defaultWidth(wd.id), h: wd.id.startsWith("w:") ? 480 : 0 });
     }
     // 新卡片 / 旧格式数据：自动装箱补位
     if (needPlace.length) {
