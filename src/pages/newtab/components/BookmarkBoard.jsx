@@ -635,13 +635,14 @@ export default function BookmarkBoard({ col }) {
     for (const e of stored) {
       if (!wanted.has(e.i) || seen.has(e.i)) continue;
       const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
-      const legacy = Number.isFinite(e.y) && e.y > 0 && e.y < 50; // 旧行单位检测
-      let h = Math.max(0, Math.round((e.h || 0) * (legacy ? LEGACY_ROW_PX : 1)));
-      if (e.i.startsWith("w:") && h < 200) h = 480; // iframe 卡保底可用内嵌高度
-      if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
-        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y * (legacy ? LEGACY_ROW_PX : 1))), w, h });
+      // 异常高度自愈（历史版本单位错乱可能写出超大值）
+      let h = Math.max(0, Math.round(e.h || 0));
+      const corrupted = h > 5000;
+      if (corrupted) h = e.i.startsWith("w:") ? 480 : 0;
+      if (Number.isFinite(e.x) && Number.isFinite(e.y) && !corrupted) {
+        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y)), w, h });
       } else {
-        needPlace.push({ i: e.i, w, h });
+        needPlace.push({ i: e.i, w, h }); // 坐标缺失或已损坏：重新装箱
       }
       seen.add(e.i);
     }
@@ -652,9 +653,8 @@ export default function BookmarkBoard({ col }) {
     if (needPlace.length) {
       for (const p of packColumns(needPlace, REF_COLS, known)) known.push(p);
     }
-    // 重力整理：保证纵向最小间距
-    return settleLayout(known, heights, cols, colW);
-  }, [data?.layout, widgetDefs, heights, cols, colW]);
+    return known;
+  }, [data?.layout, widgetDefs]);
 
   /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
   const [items, setItems] = useState(derivedLayout);
@@ -789,10 +789,24 @@ export default function BookmarkBoard({ col }) {
         const gg = gestureRef.current;
         if (!gg) return;
         const ncols = colsForWidth(gg.gridW);
-        const unitX = gg.gridW / REF_COLS;
-        const dw = Math.max(1, Math.min(REF_COLS, Math.round(gg.it.w + (cx - gg.startX) / unitX)));
+        const colW2 = (gg.gridW - (ncols - 1) * GAP) / ncols;
+        const pitchX2 = colW2 + GAP;
+        const vx0 = viewX(gg.it, ncols);
+        const span0 = viewSpan(gg.it, ncols);
+        // 拉伸不得撞进同一行带的其他卡片：先按指针算目标跨度，再按占用收窄
+        let span = Math.max(1, Math.min(ncols, Math.round(span0 + (cx - gg.startX) / pitchX2)));
+        const y0 = gg.it.y;
+        const nh = Math.max(gg.contentH, Math.round(gg.it.h + (cy - gg.startY)));
+        for (const o of gg.cur) {
+          if (o.i === gg.id) continue;
+          const ox = viewX(o, ncols);
+          const oh = effHeightPx(o, heights);
+          const yOverlap = y0 < o.y + oh && o.y < y0 + nh;
+          if (yOverlap && ox >= vx0 + 1 && ox < vx0 + span) span = Math.min(span, ox - vx0);
+        }
+        span = Math.max(1, span);
+        const dw = Math.max(1, Math.round((span * REF_COLS) / ncols));
         const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY)));
-        const span = Math.max(1, Math.min(ncols, Math.round((dw * ncols) / REF_COLS)));
         gg.cur = gg.cur.map((p) => (p.i === gg.id ? { ...p, w: dw, h: dh } : p));
         // 虚线预览框直接改样式（零重渲染），吸附列/行
         const pv = previewRef.current;
