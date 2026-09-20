@@ -24,3 +24,7 @@ dist-web
 
 # 浏览器配置文件目录（截图探针产物）
 store/pw-*
+
+# 开发用私钥（稳定扩展 ID 用，不入库）
+assets/dev-key.pem
+assets/dev-key.pub.txt
