@@ -13,6 +13,8 @@ import {
   IoEllipsisHorizontalOutline as MoreIcon,
   IoCheckmarkOutline as CheckIcon,
   IoGridOutline as GridIcon,
+  IoBookOutline as PoemIcon,
+  IoCloudOutline as CloudSyncIcon,
 } from "react-icons/io5";
 import { openUrl } from "../../../platform";
 import { findNode } from "../services/collection";
@@ -515,7 +517,7 @@ function effHeightPx(it, heights) {
 }
 
 /** 重力整理：纵向重叠或间距小于 GAP 的卡片，自动下推到恰好 GAP（14px），与左右间距一致 */
-function settleLayout(items, heights, cols, colW) {
+function settleLayout(items, heights, cols, colW, pinnedId = null) {
   const infos = items.map((it) => {
     const span = viewSpan(it, cols);
     const vx = viewX(it, cols);
@@ -527,6 +529,7 @@ function settleLayout(items, heights, cols, colW) {
     let moved = false;
     for (let i = 0; i < infos.length; i++) {
       const a = infos[i];
+      if (pinnedId && a.i === pinnedId) continue; // 被拉伸/拖动的卡片固定，由其他卡片让位
       let y = a.y;
       for (let j = 0; j < infos.length; j++) {
         if (j === i) continue;
@@ -579,6 +582,7 @@ export default function BookmarkBoard({ col }) {
   const [newGroup, setNewGroup] = useState("");
   const [wTitle, setWTitle] = useState("");
   const [wUrl, setWUrl] = useState("");
+  const [gateMsg, setGateMsg] = useState(""); // 引导门提示（自动生成 ID 等）
 
   /* 容器宽度（决定列数 10/6/4/2） */
   useEffect(() => {
@@ -780,18 +784,8 @@ export default function BookmarkBoard({ col }) {
         const pitchX2 = colW2 + GAP;
         const vx0 = viewX(gg.it, ncols);
         const span0 = viewSpan(gg.it, ncols);
-        // 拉伸不得撞进同一行带的其他卡片：先按指针算目标跨度，再按占用收窄
+        // 拉伸可自由变宽/变高；松手时其他卡片自动下移让位
         let span = Math.max(1, Math.min(ncols, Math.round(span0 + (cx - gg.startX) / pitchX2)));
-        const y0 = gg.it.y;
-        const nh = Math.max(gg.contentH, Math.round(gg.it.h + (cy - gg.startY)));
-        for (const o of gg.cur) {
-          if (o.i === gg.id) continue;
-          const ox = viewX(o, ncols);
-          const oh = effHeightPx(o, heights);
-          const yOverlap = y0 < o.y + oh && o.y < y0 + nh;
-          if (yOverlap && ox >= vx0 + 1 && ox < vx0 + span) span = Math.min(span, ox - vx0);
-        }
-        span = Math.max(1, span);
         const dw = Math.max(1, Math.round((span * REF_COLS) / ncols));
         const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY)));
         gg.cur = gg.cur.map((p) => (p.i === gg.id ? { ...p, w: dw, h: dh } : p));
@@ -832,7 +826,7 @@ export default function BookmarkBoard({ col }) {
       }
       setGesturing(false);
       // 一次性落位：重力整理后回写
-      const settled = settleLayout(g.cur, heights, cols, colW);
+      const settled = settleLayout(g.cur, heights, cols, colW, g.id);
       itemsRef.current = settled;
       setItems(settled);
       commitLayoutNow();
@@ -896,7 +890,7 @@ export default function BookmarkBoard({ col }) {
             }
           : p
       );
-      const settled = settleLayout(next, heights, cols, colW);
+      const settled = settleLayout(next, heights, cols, colW, a);
       itemsRef.current = settled;
       setItems(settled);
     }
@@ -918,62 +912,77 @@ export default function BookmarkBoard({ col }) {
     setModal(null);
   };
 
-  /* 未登录：ID 门 */
-  if (!hasUid) {
+  /* 未登录 / ID 不存在：全屏引导门 */
+  if (!hasUid || status === "notfound") {
+    const isNotFound = status === "notfound";
     return (
-      <div className="bookmark-board" ref={boardRef}>
-        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
-          <div className="bf-header">
-            <h3 className="bf-title">云端收藏夹</h3>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
-            <input id="gate-uid" className="bm-input" type="text" placeholder="输入用户 ID" spellCheck="false" onKeyDown={(e) => { if (e.key === "Enter") col.enter(e.currentTarget.value.trim()); }} />
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button type="button" className="bm-add-btn" style={{ flex: 1 }} onClick={() => col.enter(document.getElementById("gate-uid").value.trim())}>
-                打开
-              </button>
-              <button
-                type="button"
-                className="bm-add-btn bm-add-btn-ghost"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  const v = document.getElementById("gate-uid").value.trim();
-                  if (v) col.create(v);
-                }}
-              >
-                新建用户
-              </button>
+      <div className="gate-screen" ref={boardRef}>
+        <div className="gate-deco" aria-hidden="true">
+          詩
+        </div>
+        <div className="gate-card">
+          <img src="icon/128.png" alt="Poetry-Tab" className="gate-logo" />
+          <h1 className="gate-title">Poetry-Tab</h1>
+          <p className="gate-tagline">把古诗词和你的收藏，装进每一个新标签页</p>
+          <div className="gate-features">
+            <div className="gate-feature">
+              <PoemIcon className="gf-ico" />
+              <b>每日诗词</b>
+              <i>打开即见一首古诗词</i>
             </div>
-            <div className="bt-empty">同一 ID 在任何设备的扩展或网页登录，都是同一份收藏夹</div>
+            <div className="gate-feature">
+              <GridIcon className="gf-ico" />
+              <b>收藏看板</b>
+              <i>网站与小组件自由排布</i>
+            </div>
+            <div className="gate-feature">
+              <CloudSyncIcon className="gf-ico" />
+              <b>云同步</b>
+              <i>一个 ID 多端互通</i>
+            </div>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "loading") {
-    return (
-      <div className="bookmark-board" ref={boardRef}>
-        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
-          <div className="bt-empty">正在从云端加载…</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "notfound") {
-    return (
-      <div className="bookmark-board" ref={boardRef}>
-        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
-          <div className="bf-header">
-            <h3 className="bf-title">云端没有这个 ID</h3>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
-            <div className="bt-empty">要为「{col.uid}」新建一个空收藏夹吗？</div>
-            <button type="button" className="bm-add-btn" onClick={() => col.create(col.uid)}>
-              新建收藏夹
+          <div className="gate-form">
+            <input
+              id="gate-uid"
+              className="gate-input"
+              type="text"
+              placeholder="输入用户 ID"
+              spellCheck="false"
+              autoCapitalize="off"
+              defaultValue={isNotFound ? col.uid : undefined}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") col.enter(e.currentTarget.value.trim());
+              }}
+            />
+            <button
+              type="button"
+              className="gate-btn primary"
+              onClick={() => col.enter(document.getElementById("gate-uid").value.trim())}
+            >
+              进入我的收藏
+            </button>
+            <button
+              type="button"
+              className="gate-btn ghost"
+              onClick={() => {
+                const v = document.getElementById("gate-uid").value.trim();
+                if (v) {
+                  col.create(v);
+                  return;
+                }
+                const gen = "tab-" + Math.random().toString(36).slice(2, 8);
+                document.getElementById("gate-uid").value = gen;
+                setGateMsg("已为你生成用户 ID：" + gen + "，再次点击完成创建");
+              }}
+            >
+              新建用户
             </button>
           </div>
+          {isNotFound && (
+            <div className="gate-error">云端没有「{col.uid}」这个 ID，点「新建用户」即可创建</div>
+          )}
+          {gateMsg && <div className="gate-msg">{gateMsg}</div>}
+          <p className="gate-hint">用户 ID 即身份，无需注册；同一 ID 在扩展与网页端共享，请妥善保管</p>
         </div>
       </div>
     );

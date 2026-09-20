@@ -1066,3 +1066,162 @@
   opacity: 1 !important;
   background: var(--color-base-100);
 }
+
+/* ===== 新用户全屏引导门 ===== */
+.gate-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  background:
+    radial-gradient(1100px 460px at 50% -8%, color-mix(in oklab, var(--color-primary) 13%, transparent), transparent 70%),
+    var(--color-base-100);
+}
+
+.gate-deco {
+  position: absolute;
+  right: 3vw;
+  top: 1vh;
+  font-family: var(--custom-font-name), "KaiTi", serif;
+  font-size: min(36vw, 26rem);
+  line-height: 1;
+  color: color-mix(in oklab, var(--color-primary) 8%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+
+.gate-card {
+  position: relative;
+  width: min(92vw, 560px);
+  text-align: center;
+}
+
+.gate-logo {
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  box-shadow: 0 12px 32px color-mix(in oklab, var(--color-base-content) 18%, transparent);
+}
+
+.gate-title {
+  font-family: var(--custom-font-name), "KaiTi", serif;
+  font-size: 2.5rem;
+  letter-spacing: 0.05em;
+  margin: 1rem 0 0.3rem;
+}
+
+.gate-tagline {
+  opacity: 0.62;
+  font-size: 0.95rem;
+  margin: 0 0 1.4rem;
+}
+
+.gate-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+  margin-bottom: 1.6rem;
+}
+
+.gate-feature {
+  padding: 0.85rem 0.5rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 9%, transparent);
+  background: color-mix(in oklab, var(--color-base-100) 55%, transparent);
+  box-shadow: 0 4px 18px color-mix(in oklab, var(--color-base-content) 5%, transparent);
+}
+
+.gate-feature .gf-ico {
+  width: 1.45rem;
+  height: 1.45rem;
+  opacity: 0.75;
+}
+
+.gate-feature b {
+  display: block;
+  font-size: 0.86rem;
+  margin: 0.3rem 0 0.2rem;
+}
+
+.gate-feature i {
+  font-style: normal;
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+.gate-input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  font-size: 1rem;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gate-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary) 18%, transparent);
+}
+
+.gate-btn {
+  width: 100%;
+  padding: 0.78rem;
+  border-radius: 0.85rem;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.15s ease;
+}
+
+.gate-btn.primary {
+  margin-top: 0.65rem;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  font-weight: 600;
+}
+
+.gate-btn.primary:hover {
+  filter: brightness(1.06);
+}
+
+.gate-btn.ghost {
+  margin-top: 0.55rem;
+  background: transparent;
+  color: var(--color-base-content);
+  opacity: 0.65;
+}
+
+.gate-btn.ghost:hover {
+  opacity: 1;
+}
+
+.gate-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.6rem;
+  font-size: 0.82rem;
+  background: color-mix(in oklab, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+}
+
+.gate-msg {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.6rem;
+  font-size: 0.82rem;
+  background: color-mix(in oklab, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.gate-hint {
+  margin-top: 1.15rem;
+  font-size: 0.72rem;
+  opacity: 0.45;
+}
