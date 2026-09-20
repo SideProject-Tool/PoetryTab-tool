@@ -13,8 +13,8 @@ export default defineConfig({
     permissions: [],
     host_permissions: ["https://sync.pathmemos.com/*"],
     author: "startnewlabs",
-    name: "Proton Collect",
-    description: "Proton Collect - 在新标签页上展示中国经典诗词和收藏夹书签。",
+    name: "Poetry-Tab",
+    description: "Poetry-Tab - 在新标签页上展示中国经典诗词和收藏夹书签。",
     action: {
       default_icon: {
         16: "icon/16.png",
@@ -24,7 +24,7 @@ export default defineConfig({
         64: "icon/64.png",
         128: "icon/128.png",
       },
-      default_title: "Proton Collect",
+      default_title: "Poetry-Tab",
     },
   },
 });

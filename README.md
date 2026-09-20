@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/icon/256.png" alt="Proton Collect 图标" width="112" height="112" />
+  <img src="public/icon/256.png" alt="Poetry-Tab 图标" width="112" height="112" />
 </p>
 
-<h1 align="center">Proton Collect</h1>
+<h1 align="center">Poetry-Tab</h1>
 
 <p align="center"><b>古诗词 · 收藏看板 · 云同步 —— 你的新标签页，一屏装下诗与远方</b></p>
 

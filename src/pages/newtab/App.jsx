@@ -46,7 +46,7 @@ export default function App() {
   }, [settings.theme, applyTheme]);
 
   useEffect(() => {
-    document.title = navigator.languages.includes("zh") ? "新标签页" : "New Tab";
+    document.title = "Poetry-Tab";
   }, []);
 
   /* 快捷键 S：呼出搜索（焦点在输入框时忽略） */

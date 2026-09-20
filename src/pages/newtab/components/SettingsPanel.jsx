@@ -10,9 +10,11 @@ import {
   IoCloudUploadOutline as UploadIcon,
   IoCloudDownloadOutline as DownloadIcon,
   IoCloudOutline as CloudIcon,
+  IoGlobeOutline as GlobeIcon,
 } from "react-icons/io5";
 import { MdTimelapse as SyncIcon } from "react-icons/md";
 import { SEARCH_ENGINES } from "../services/constants";
+import { openUrl } from "../../../platform";
 
 const THEME_LABELS = { sync: "跟随系统", light: "浅色", dark: "深色" };
 const ENGINE_KEYS = Object.keys(SEARCH_ENGINES);
@@ -180,6 +182,19 @@ export default function SettingsPanel({ col }) {
             </span>
             <span className="settings-row-label">从云端恢复</span>
             <span className="settings-row-value">重新拉取</span>
+          </button>
+
+          <button
+            className="settings-row"
+            onClick={() => openUrl("https://sync.pathmemos.com")}
+            type="button"
+            title="在浏览器中打开网页版"
+          >
+            <span className="settings-row-icon">
+              <GlobeIcon className="w-5 h-5" />
+            </span>
+            <span className="settings-row-label">网页版</span>
+            <span className="settings-row-value">打开 ↗</span>
           </button>
 
           {msg && (

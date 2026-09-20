@@ -70,7 +70,7 @@ export function useContentEngine(selectedCategories = ["i"]) {
 
       if (!contents.length) {
         const fallback = formatContentForDisplay({
-          displayTitle: "欢迎使用 Proton Collect",
+          displayTitle: "欢迎使用 Poetry-Tab",
           displaySource: "",
           displayAuthor: "",
         });
