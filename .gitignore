@@ -21,3 +21,6 @@ release/
 
 # Web 构建产物
 dist-web
+
+# 浏览器配置文件目录（截图探针产物）
+store/pw-*
