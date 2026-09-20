@@ -203,28 +203,22 @@ export default function SettingsPanel({ col }) {
           </button>
 
           {isCatsExpanded && (
-            <div className="px-3 pb-3 grid grid-cols-2 gap-x-1 gap-y-2 mt-2 max-h-[160px] overflow-y-auto" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(85px, 1fr))" }}>
+            <div className="settings-cats">
               {CATS.map((cat) => {
                 const isSelected = settings.cats.includes(cat.key);
                 const isDisabled = isSelected && settings.cats.length <= 1;
                 return (
-                  <label
+                  <button
                     key={cat.key}
-                    className={`flex items-center space-x-2 text-sm select-none p-1.5 rounded-md transition-colors ${
-                      isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-base-200/50"
-                    }`}
-                    title={isDisabled ? "请至少保留一个类别" : undefined}
+                    type="button"
+                    className={`settings-cat ${isSelected ? "on" : ""}`}
+                    onClick={() => toggleCat(cat.key)}
+                    disabled={isDisabled}
+                    style={isDisabled ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                    title={isDisabled ? "请至少保留一个类别" : cat.name}
                   >
-                    <input
-                      type="checkbox"
-                      className="checkbox checkbox-xs"
-                      checked={isSelected}
-                      onChange={() => toggleCat(cat.key)}
-                      disabled={isDisabled}
-                      style={{ borderRadius: "0.25rem" }}
-                    />
-                    <span className="whitespace-nowrap">{cat.name}</span>
-                  </label>
+                    {cat.name}
+                  </button>
                 );
               })}
             </div>

@@ -67,6 +67,89 @@
   transform: rotate(30deg);
 }
 
+/* 展示类别：胶囊标签（纯 CSS，双端渲染一致） */
+.settings-cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr));
+  gap: 0.4rem;
+  padding: 0.25rem 0.85rem 0.85rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.settings-cat {
+  padding: 0.34rem 0.3rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 18%, transparent);
+  background: transparent;
+  color: var(--color-base-content);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.72;
+  transition: all 0.15s ease;
+}
+
+.settings-cat:hover {
+  opacity: 1;
+  border-color: color-mix(in oklab, var(--color-primary) 45%, transparent);
+}
+
+.settings-cat.on {
+  background: color-mix(in oklab, var(--color-primary) 88%, transparent);
+  border-color: transparent;
+  color: var(--color-primary-content);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.settings-cat:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 展示类别：胶囊标签（纯 CSS，双端渲染一致） */
+.settings-cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr));
+  gap: 0.4rem;
+  padding: 0.25rem 0.85rem 0.85rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.settings-cat {
+  padding: 0.34rem 0.3rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 18%, transparent);
+  background: transparent;
+  color: var(--color-base-content);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.72;
+  transition: all 0.15s ease;
+}
+
+.settings-cat:hover {
+  opacity: 1;
+  border-color: color-mix(in oklab, var(--color-primary) 45%, transparent);
+}
+
+.settings-cat.on {
+  background: color-mix(in oklab, var(--color-primary) 88%, transparent);
+  border-color: transparent;
+  color: var(--color-primary-content);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.settings-cat:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .settings-popover {
   position: absolute;
   top: calc(100% + 0.75rem);
