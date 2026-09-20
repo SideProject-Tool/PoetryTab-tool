@@ -1,0 +1,958 @@
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
+import { SortableContext, useSortable, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  IoAddOutline as AddIcon,
+  IoOpenOutline as OpenIcon,
+  IoTrashOutline as TrashIcon,
+  IoReloadOutline as ReloadIcon,
+  IoCloseOutline as CloseIcon,
+  IoFolderOutline as FolderIcon,
+  IoCreateOutline as EditIcon,
+  IoEllipsisHorizontalOutline as MoreIcon,
+  IoCheckmarkOutline as CheckIcon,
+  IoGridOutline as GridIcon,
+} from "react-icons/io5";
+import { openUrl } from "../../../platform";
+import { findNode } from "../services/collection";
+import { colsForWidth, REF_COLS } from "../grid";
+
+/**
+ * 云端收藏看板（插件版与网页版共用这一个组件）。
+ * - 流式网格：卡片高度随内容自适应（不在卡片内滚动），整页随内容增长、浏览器滚动条查看全部
+ * - 卡片宽度 = 网格列跨度；可拖动排序、右下角把手调整宽度；列数随宽度自适应 10/6/4/2
+ * - 布局（顺序 + 跨度）以参考列数 10 存到云端，跨设备一致
+ * - 顶层分组 → 卡片；新建分组/添加小部件收进右下角悬浮按钮（不占网格）
+ * - 每张卡片右上角 ⋯ 管理面板；所有修改防抖自动保存回云端
+ */
+
+const ROW_H = 76; /* 拉伸的最小高度单位（像素），跨设备一致 */
+const GAP = 14;
+
+const PALETTE = [
+  "#c96f5e", "#7b9e56", "#5e89c9", "#b0785e", "#8a6fc9", "#c95e8a", "#5eb0a5", "#c9a35e",
+];
+
+function paletteColor(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return PALETTE[Math.abs(h) % PALETTE.length];
+}
+
+/* 新卡片默认列跨度（参考列数空间）：普通 2，iframe 小部件 3 */
+function defaultWidth(id) {
+  return id.startsWith("w:") ? 3 : 2;
+}
+
+/* ---------- 瓷贴 ---------- */
+
+function TileIcon({ item }) {
+  const [failed, setFailed] = useState(false);
+  if (item.children) {
+    return (
+      <span className="bt-icon bt-icon-folder">
+        <FolderIcon />
+      </span>
+    );
+  }
+  const label = item.title || item.url || "?";
+  const letter = label.trim().charAt(0).toUpperCase() || "?";
+  const tint = paletteColor(label);
+  if (item.favicon && !failed) {
+    return (
+      <span className="bt-icon">
+        <img src={item.favicon} alt="" loading="lazy" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+  return (
+    <span className="bt-icon" style={{ color: tint, background: tint + "1c" }}>
+      {letter}
+    </span>
+  );
+}
+
+function BookmarkTile({ item }) {
+  return (
+    <a
+      href={item.url}
+      className="bt"
+      title={item.title}
+      onClick={(e) => {
+        if (e.ctrlKey || e.metaKey || e.button === 1) return;
+        e.preventDefault();
+        openUrl(item.url);
+      }}
+    >
+      <TileIcon item={item} />
+      <span className="bt-label">{item.title || item.url}</span>
+    </a>
+  );
+}
+
+function FolderTile({ folder, onOpen }) {
+  return (
+    <button type="button" className="bt" title={folder.title} onClick={() => onOpen(folder.id)}>
+      <TileIcon item={folder} />
+      <span className="bt-label">{folder.title}</span>
+    </button>
+  );
+}
+
+function TileGrid({ items, onOpenFolder }) {
+  return (
+    <div className="bt-grid">
+      {items.map((item) =>
+        item.children ? (
+          <FolderTile key={item.id} folder={item} onOpen={onOpenFolder} />
+        ) : (
+          <BookmarkTile key={item.id} item={item} />
+        )
+      )}
+    </div>
+  );
+}
+
+/* ---------- 分组卡片（子文件夹 → 标签页） ---------- */
+
+function GroupWidget({ folder, onOpenFolder, onManage, dragHandle }) {
+  const subs = folder.children.filter((c) => c.children);
+  const direct = folder.children.filter((c) => !c.children);
+  const [active, setActive] = useState("");
+  const items = active ? ((folder.children.find((c) => c.id === active) || {}).children || []) : direct;
+
+  return (
+    <div className="board-widget">
+      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
+        <h3 className="board-widget-title">{folder.title || "未命名"}</h3>
+        <div className="board-widget-actions">
+          <span className="board-widget-count">{folder.children.length} 项</span>
+          <button type="button" className="board-widget-action" title="管理分组" onClick={() => onManage(folder.id)}>
+            <MoreIcon className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      {subs.length > 0 && (
+        <div className="board-widget-tabs">
+          <button
+            type="button"
+            className={`board-widget-tab ${active === "" ? "active" : ""}`}
+            onClick={() => setActive("")}
+          >
+            全部
+          </button>
+          {subs.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              className={`board-widget-tab ${active === sub.id ? "active" : ""}`}
+              onClick={() => setActive(sub.id)}
+            >
+              {sub.title || "未命名"}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="board-widget-body">
+        <TileGrid items={items} onOpenFolder={onOpenFolder} />
+        {items.length === 0 && <div className="bt-empty">这个分组还没有书签</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 常用网站卡片 ---------- */
+
+function QuickSitesWidget({ sites, onManage, dragHandle }) {
+  return (
+    <div className="board-widget">
+      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
+        <h3 className="board-widget-title">常用网站</h3>
+        <div className="board-widget-actions">
+          <button type="button" className="board-widget-action" title="管理" onClick={onManage}>
+            <MoreIcon className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      <div className="board-widget-body">
+        <div className="bt-grid">
+          {sites.map((s) => (
+            <BookmarkTile key={s.id} item={s} />
+          ))}
+        </div>
+        {sites.length === 0 && <div className="bt-empty">常用网站为空，点 ⋯ 添加</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- iframe 小部件 ---------- */
+
+function IframeWidget({ widget, onRemove, dragHandle }) {
+  const [reloadKey, setReloadKey] = useState(0);
+  return (
+    <div className="board-widget board-widget-iframe">
+      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
+        <h3 className="board-widget-title">{widget.title}</h3>
+        <div className="board-widget-actions">
+          <button type="button" className="board-widget-action" title="重新加载" onClick={() => setReloadKey((k) => k + 1)}>
+            <ReloadIcon className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            className="board-widget-action"
+            title="在新标签页打开"
+            onClick={() => openUrl(widget.url)}
+          >
+            <OpenIcon className="w-4 h-4" />
+          </button>
+          <button type="button" className="board-widget-action board-widget-action-danger" title="删除小部件" onClick={() => onRemove(widget.id)}>
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      <div className="board-iframe-body">
+        <iframe key={reloadKey} src={widget.url} className="board-iframe" title={widget.title} referrerPolicy="no-referrer" />
+      </div>
+      <div className="board-iframe-hint">若页面空白，说明该网站禁止内嵌，点右上角 ↗ 新窗口打开</div>
+    </div>
+  );
+}
+
+/* ---------- 管理面板（⋯） ---------- */
+
+function ManageSheet({ col, target, onClose }) {
+  // target: {type:"folder", id} | {type:"quicksites"}
+  const isQs = target.type === "quicksites";
+  const node = !isQs && col.data ? findNode(col.data, target.id)?.node : null;
+
+  const [nTitle, setNTitle] = useState("");
+  const [nUrl, setNUrl] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [eTitle, setETitle] = useState("");
+  const [eUrl, setEUrl] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(node ? node.title : "");
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const items = isQs ? col.data?.quickSites || [] : node?.children || [];
+  const title = isQs ? "常用网站" : node ? node.title || "未命名" : "";
+
+  const submitAdd = () => {
+    if (!nUrl.trim()) return;
+    const url = /^https?:\/\//i.test(nUrl.trim()) ? nUrl.trim() : "https://" + nUrl.trim();
+    const t = nTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+    if (isQs) col.addQuickSite({ title: t, url });
+    else col.addItem(target.id, { title: t, url });
+    setNTitle("");
+    setNUrl("");
+  };
+  const submitRename = () => {
+    if (renameDraft.trim()) col.renameNode(target.id, renameDraft.trim());
+    setRenaming(false);
+  };
+
+  return (
+    <div className="bf-overlay" onClick={onClose}>
+      <div className="bf-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="bf-header">
+          {renaming ? (
+            <input
+              className="bm-rename"
+              value={renameDraft}
+              autoFocus
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitRename();
+                if (e.key === "Escape") setRenaming(false);
+              }}
+            />
+          ) : (
+            <h3 className="bf-title">{title}</h3>
+          )}
+          <div className="bf-header-right">
+            {renaming ? (
+              <button type="button" className="bf-close" title="确认重命名" onClick={submitRename}>
+                <CheckIcon />
+              </button>
+            ) : (
+              !isQs && (
+                <button type="button" className="board-widget-action" title="重命名分组" onClick={() => setRenaming(true)}>
+                  <EditIcon className="w-4 h-4" />
+                </button>
+              )
+            )}
+            <button type="button" className="bf-close" onClick={onClose} title="关闭">
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+
+        <div className="bm-add">
+          <input className="bm-input" type="text" placeholder="标题（可选）" value={nTitle} onChange={(e) => setNTitle(e.target.value)} />
+          <input
+            className="bm-input"
+            type="text"
+            placeholder="网址 example.com（填了网址 + 收录 即保存）"
+            value={nUrl}
+            onChange={(e) => setNUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitAdd()}
+          />
+          <button type="button" className="bm-add-btn" disabled={!nUrl.trim()} onClick={submitAdd}>
+            ＋ 收录
+          </button>
+        </div>
+
+        <div className="bm-list">
+          {items.map((item) =>
+            editId === item.id ? (
+              <div key={item.id} className="bm-row bm-row-edit">
+                <input className="bm-input" value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="标题" />
+                <input className="bm-input" value={eUrl} onChange={(e) => setEUrl(e.target.value)} placeholder="网址" />
+                <button
+                  type="button"
+                  className="bm-op"
+                  title="保存"
+                  onClick={() => {
+                    const url = /^https?:\/\//i.test(eUrl.trim()) ? eUrl.trim() : "https://" + eUrl.trim();
+                    if (isQs) col.updateQuickSite(item.id, { title: eTitle.trim() || url, url });
+                    else col.updateNode(item.id, { title: eTitle.trim() || url, url });
+                    setEditId(null);
+                  }}
+                >
+                  <CheckIcon />
+                </button>
+                <button type="button" className="bm-op" title="取消" onClick={() => setEditId(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            ) : (
+              <div key={item.id} className="bm-row">
+                {item.children ? (
+                  <span className="bm-row-folder">🗂 {item.title || "未命名"}</span>
+                ) : (
+                  <button type="button" className="bm-row-open" title="打开" onClick={() => openUrl(item.url)}>
+                    {item.title || item.url}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="bm-op"
+                  title="编辑"
+                  onClick={() => {
+                    setEditId(item.id);
+                    setETitle(item.title || "");
+                    setEUrl(item.url || "");
+                  }}
+                >
+                  <EditIcon />
+                </button>
+                <button
+                  type="button"
+                  className="bm-op bm-op-danger"
+                  title={item.children ? "删除文件夹（含内容）" : "删除"}
+                  onClick={() => {
+                    if (isQs) col.removeQuickSite(item.id);
+                    else col.removeNode(item.id);
+                  }}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            )
+          )}
+          {items.length === 0 && <div className="bt-empty">还没有内容，用上面的表单收录</div>}
+        </div>
+
+        {!isQs && (
+          <div className="bm-folder-ops">
+            {confirmDel ? (
+              <button
+                type="button"
+                id="bm-del-folder-confirm"
+                className="bm-del-folder confirming"
+                onClick={() => {
+                  col.removeNode(target.id);
+                  onClose();
+                }}
+              >
+                再点一次，确认删除整个分组
+              </button>
+            ) : (
+              <button type="button" className="bm-del-folder" onClick={() => setConfirmDel(true)}>
+                删除这个分组
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 文件夹浏览浮层（子文件夹进入） ---------- */
+
+function FolderBrowser({ folderId, data, onClose }) {
+  const [pathIds, setPathIds] = useState([folderId]);
+
+  const nodeAt = (ids) => {
+    let children = data.folders || [];
+    let node = null;
+    for (const id of ids) {
+      node = children.find((c) => c.id === id) || null;
+      if (!node) return null;
+      children = node.children || [];
+    }
+    return node;
+  };
+
+  const current = nodeAt(pathIds);
+  if (!current) return null;
+  const trail = pathIds.map((id, idx) => ({ id, title: nodeAt(pathIds.slice(0, idx + 1))?.title || "未命名" }));
+
+  return (
+    <div className="bf-overlay" onClick={onClose}>
+      <div className="bf-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="bf-header">
+          <div className="bf-crumbs">
+            {trail.map((c, i) => (
+              <span key={c.id} className="bf-crumb-wrap">
+                {i > 0 && <span className="bf-crumb-sep">›</span>}
+                <button
+                  type="button"
+                  className={`bf-crumb ${i === trail.length - 1 ? "active" : ""}`}
+                  onClick={() => setPathIds(pathIds.slice(0, i + 1))}
+                >
+                  {c.title}
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="bf-header-right">
+            <span className="bf-count">{(current.children || []).length} 项</span>
+            <button type="button" className="bf-close" onClick={onClose} title="关闭">
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+        <div className="bf-body">
+          {(current.children || []).length > 0 ? (
+            <TileGrid
+              items={current.children || []}
+              onOpenFolder={(sub) => setPathIds(pathIds.concat(sub.id))}
+            />
+          ) : (
+            <div className="bt-empty">空文件夹</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 可排序网格单元 + 拖拽浮层 ---------- */
+
+function SortableCell({ def, span, minH, children }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id: def.id });
+  return (
+    <div
+      ref={setNodeRef}
+      data-id={def.id}
+      className={`board-cell ${isDragging ? "dragging-src" : ""}`}
+      style={{
+        gridColumn: `span ${span}`,
+        minHeight: minH,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      {children({ ref: setActivatorNodeRef, props: { ...attributes, ...listeners } })}
+      <span className="board-resize" title="拖动调整大小：横向改宽度，纵向改最小高度" />
+    </div>
+  );
+}
+
+function OverlayCard({ def, width }) {
+  if (!def) return null;
+  const title =
+    def.kind === "qs" ? "常用网站" : def.kind === "iframe" ? def.widget.title : def.folder.title || "未命名";
+  return (
+    <div className="board-widget board-overlay" style={{ width }}>
+      <div className="board-widget-header">
+        <h3 className="board-widget-title">{title}</h3>
+        <span className="board-widget-count">拖动中…</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 看板入口 ---------- */
+
+export default function BookmarkBoard({ col }) {
+  const { data, status, hasUid } = col;
+  const boardRef = useRef(null);
+  const [width, setWidth] = useState(0);
+  const [manage, setManage] = useState(null); // {type:"folder",id} | {type:"quicksites"}
+  const [browsing, setBrowsing] = useState(null); // folderId
+  const [fabOpen, setFabOpen] = useState(false);
+  const [modal, setModal] = useState(null); // "group" | "widget"
+  const [newGroup, setNewGroup] = useState("");
+  const [wTitle, setWTitle] = useState("");
+  const [wUrl, setWUrl] = useState("");
+
+  /* 容器宽度（决定列数 10/6/4/2） */
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const en of entries) setWidth(en.contentRect.width);
+    });
+    ro.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+
+  const folders = useMemo(() => (data ? data.folders || [] : []), [data]);
+  const quickSites = useMemo(() => (data ? data.quickSites || [] : []), [data]);
+  const iframeWidgets = useMemo(() => (data ? data.iframeWidgets || [] : []), [data]);
+
+  /* 网格内的卡片清单：常用网站 + 各分组 + iframe 小部件 */
+  const widgetDefs = useMemo(() => {
+    const list = [{ id: "qs:quicksites", kind: "qs" }];
+    for (const f of folders) list.push({ id: "f:" + f.id, kind: "folder", folder: f });
+    for (const w of iframeWidgets) list.push({ id: "w:" + w.id, kind: "iframe", widget: w });
+    return list;
+  }, [folders, iframeWidgets]);
+  const defMap = useMemo(() => new Map(widgetDefs.map((d) => [d.id, d])), [widgetDefs]);
+
+  /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
+     w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
+  /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
+     w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
+     卡片高度 = max(内容高度, h 行)——拉伸只抬高下限，内容永远完整展开不裁剪 */
+  const derivedLayout = useMemo(() => {
+    const stored = Array.isArray(data?.layout) ? data.layout : [];
+    const wanted = new Map(widgetDefs.map((w) => [w.id, true]));
+    const out = [];
+    const seen = new Set();
+    for (const e of stored) {
+      if (!wanted.has(e.i) || seen.has(e.i)) continue;
+      const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
+      const h = Math.max(0, Math.round(e.h || 0));
+      out.push({ i: e.i, w, h });
+      seen.add(e.i);
+    }
+    for (const wd of widgetDefs) {
+      if (!seen.has(wd.id)) out.push({ i: wd.id, w: defaultWidth(wd.id), h: 0 });
+    }
+    return out;
+  }, [data?.layout, widgetDefs]);
+
+  /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
+  const [items, setItems] = useState(derivedLayout);
+  const [gesturing, setGesturing] = useState(false);
+  const [activeId, setActiveId] = useState(null); // dnd-kit 正在拖动的卡片
+  const [overlayW, setOverlayW] = useState(280);
+  const itemsRef = useRef(items);
+  const gestureRef = useRef(null); // {id, it, startX, startY, cur, ...预览几何}（仅拉伸）
+  const gridRef = useRef(null);
+  const previewRef = useRef(null);
+  const rafRef = useRef(0);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  useEffect(() => {
+    if (!gesturing && !activeId) setItems(derivedLayout);
+  }, [derivedLayout, gesturing, activeId]);
+
+  const cols = colsForWidth(width || 1280);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  /* 拉伸手势挂在网格容器上（容器永不重排）：按住右下角把手，横向调宽度、纵向调最小高度。
+     拖动排序交给 dnd-kit（跟手浮层 + 位移动画 + 自动滚屏） */
+  const onGridPointerDown = useCallback(
+    (e) => {
+      if (gestureRef.current || e.button > 0) return;
+      if (!e.target.closest(".board-resize")) return;
+      const cellEl = e.target.closest(".board-cell");
+      if (!cellEl) return;
+      const id = cellEl.dataset.id;
+      const it = itemsRef.current.find((p) => p.i === id);
+      if (!it) return;
+      const gridEl = gridRef.current;
+      if (!gridEl) return;
+      e.preventDefault();
+      const gridRect = gridEl.getBoundingClientRect();
+      const cardRect = cellEl.getBoundingClientRect();
+      const ncols = colsForWidth(gridRect.width);
+      // 高度下限 = 真实内容高度（不含此前拉伸附加的最小高度），否则放大后永远缩不回去。
+      // body 是 flex 拉伸的，直接量子元素测不到自然高度，须临时清零 min-height 再量
+      let contentH = cardRect.height;
+      const prevMin = cellEl.style.minHeight;
+      cellEl.style.minHeight = "0";
+      contentH = cellEl.getBoundingClientRect().height;
+      cellEl.style.minHeight = prevMin;
+      gestureRef.current = {
+        id, it, startX: e.clientX, startY: e.clientY, cur: itemsRef.current,
+        gridW: gridRect.width,
+        cardLeft: cardRect.left - gridRect.left,
+        cardTop: cardRect.top - gridRect.top,
+        contentH,
+        colW: (gridRect.width - (ncols - 1) * GAP) / ncols,
+      };
+      // 预览框初始 = 当前卡片尺寸
+      const pv = previewRef.current;
+      if (pv) {
+        pv.classList.add("active");
+        pv.style.left = cardRect.left - gridRect.left + "px";
+        pv.style.top = cardRect.top - gridRect.top + "px";
+        pv.style.width = cardRect.width + "px";
+        pv.style.height = cardRect.height + "px";
+        const badge = pv.querySelector(".board-resize-badge");
+        const span = Math.max(1, Math.min(ncols, Math.round((it.w * ncols) / REF_COLS)));
+        if (badge) badge.textContent = span + " 列";
+      }
+      setGesturing(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    []
+  );
+
+  const onGridPointerMove = useCallback(
+    (e) => {
+      const g = gestureRef.current;
+      if (!g || rafRef.current) return;
+      const cx = e.clientX;
+      const cy = e.clientY;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const gg = gestureRef.current;
+        if (!gg) return;
+        const ncols = colsForWidth(gg.gridW);
+        const unitX = gg.gridW / REF_COLS;
+        const dw = Math.max(1, Math.min(REF_COLS, Math.round(gg.it.w + (cx - gg.startX) / unitX)));
+        const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY) / (ROW_H + GAP)));
+        const span = Math.max(1, Math.min(ncols, Math.round((dw * ncols) / REF_COLS)));
+        gg.cur = gg.cur.map((p) => (p.i === gg.id ? { ...p, w: dw, h: dh } : p));
+        // 虚线预览框直接改样式（零重渲染），吸附列/行
+        const pv = previewRef.current;
+        if (pv) {
+          const w = span * gg.colW + (span - 1) * GAP;
+          const h = Math.max(gg.contentH, dh > 0 ? dh * (ROW_H + GAP) - GAP : 0);
+          pv.style.width = w + "px";
+          pv.style.height = h + "px";
+          const badge = pv.querySelector(".board-resize-badge");
+          if (badge) badge.textContent = dh > 0 ? span + " 列 × " + dh + " 行" : span + " 列";
+        }
+      });
+    },
+    [width]
+  );
+
+  const commitLayoutNow = useCallback(() => {
+    col.setLayout(itemsRef.current.map((p) => ({ i: p.i, w: p.w, h: p.h })));
+  }, [col]);
+
+  const onGridPointerUp = useCallback(
+    (e) => {
+      const g = gestureRef.current;
+      if (!g) return;
+      gestureRef.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+      const pv = previewRef.current;
+      if (pv) pv.classList.remove("active");
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* 指针已释放时忽略 */
+      }
+      setGesturing(false);
+      // 一次性落位：此时才重排网格
+      itemsRef.current = g.cur;
+      setItems(g.cur);
+      commitLayoutNow();
+    },
+    [commitLayoutNow]
+  );
+
+  /* dnd-kit：跨过哪张卡片就实时换位，松手落库 */
+  const onDragOver = useCallback(({ active, over }) => {
+    if (!over) return;
+    const a = String(active.id);
+    const o = String(over.id);
+    if (a === o) return;
+    setItems((prev) => {
+      const from = prev.findIndex((p) => p.i === a);
+      const to = prev.findIndex((p) => p.i === o);
+      if (from < 0 || to < 0) return prev;
+      const next = arrayMove(prev, from, to);
+      if (next.every((p, i) => p.i === prev[i].i)) return prev;
+      itemsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const onDragEnd = useCallback(() => {
+    setActiveId(null);
+    commitLayoutNow();
+  }, [commitLayoutNow]);
+
+  const submitNewGroup = () => {
+    if (!newGroup.trim()) return;
+    col.addFolder(newGroup.trim());
+    setNewGroup("");
+    setModal(null);
+  };
+  const submitWidget = () => {
+    if (!wUrl.trim()) return;
+    const url = /^https?:\/\//i.test(wUrl.trim()) ? wUrl.trim() : "https://" + wUrl.trim();
+    col.addIframe({ title: wTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""), url, width: 560 });
+    setWTitle("");
+    setWUrl("");
+    setModal(null);
+  };
+
+  /* 未登录：ID 门 */
+  if (!hasUid) {
+    return (
+      <div className="bookmark-board" ref={boardRef}>
+        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
+          <div className="bf-header">
+            <h3 className="bf-title">云端收藏夹</h3>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
+            <input id="gate-uid" className="bm-input" type="text" placeholder="输入用户 ID" spellCheck="false" onKeyDown={(e) => { if (e.key === "Enter") col.enter(e.currentTarget.value.trim()); }} />
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" className="bm-add-btn" style={{ flex: 1 }} onClick={() => col.enter(document.getElementById("gate-uid").value.trim())}>
+                打开
+              </button>
+              <button
+                type="button"
+                className="bm-add-btn bm-add-btn-ghost"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  const v = document.getElementById("gate-uid").value.trim();
+                  if (v) col.create(v);
+                }}
+              >
+                新建用户
+              </button>
+            </div>
+            <div className="bt-empty">同一 ID 在任何设备的扩展或网页登录，都是同一份收藏夹</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="bookmark-board" ref={boardRef}>
+        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
+          <div className="bt-empty">正在从云端加载…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "notfound") {
+    return (
+      <div className="bookmark-board" ref={boardRef}>
+        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
+          <div className="bf-header">
+            <h3 className="bf-title">云端没有这个 ID</h3>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
+            <div className="bt-empty">要为「{col.uid}」新建一个空收藏夹吗？</div>
+            <button type="button" className="bm-add-btn" onClick={() => col.create(col.uid)}>
+              新建收藏夹
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="bookmark-board" ref={boardRef}>
+        <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
+          <div className="bf-header">
+            <h3 className="bf-title">加载失败</h3>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
+            <div className="bt-empty">{col.error || "网络异常，请重试"}</div>
+            <button type="button" className="bm-add-btn" onClick={() => col.load(col.uid)}>
+              重试
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const renderWidgetBody = (def, handle) => {
+    if (def.kind === "qs")
+      return <QuickSitesWidget sites={quickSites} onManage={() => setManage({ type: "quicksites" })} dragHandle={handle} />;
+    if (def.kind === "folder")
+      return (
+        <GroupWidget
+          folder={def.folder}
+          onOpenFolder={(id) => setBrowsing(id)}
+          onManage={(id) => setManage({ type: "folder", id })}
+          dragHandle={handle}
+        />
+      );
+    return <IframeWidget widget={def.widget} onRemove={col.removeIframe} dragHandle={handle} />;
+  };
+
+  const overlayDef = activeId ? defMap.get(activeId) : null;
+
+  return (
+    <div className={`bookmark-board board-rgl ${gesturing ? "gesturing" : ""} ${activeId ? "dnd-active" : ""}`} ref={boardRef}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={({ active }) => {
+          setActiveId(String(active.id));
+          setOverlayW(active.rect.current.initial?.width || 280);
+        }}
+        onDragOver={onDragOver}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActiveId(null)}
+      >
+        <SortableContext items={items.map((p) => p.i)} strategy={rectSortingStrategy}>
+          <div
+            ref={gridRef}
+            className="board-grid"
+            style={{ "--board-cols": cols }}
+            onPointerDown={onGridPointerDown}
+            onPointerMove={onGridPointerMove}
+            onPointerUp={onGridPointerUp}
+            onPointerCancel={onGridPointerUp}
+          >
+            {items.map((it) => {
+              const def = defMap.get(it.i);
+              if (!def) return null;
+              const span = Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
+              const minH = it.h > 0 ? `${it.h * ROW_H + (it.h - 1) * GAP}px` : undefined;
+              return (
+                <SortableCell key={it.i} def={def} span={span} minH={minH}>
+                  {({ ref, props }) => renderWidgetBody(def, { ref, props })}
+                </SortableCell>
+              );
+            })}
+            {/* 拉伸时的吸附虚线预览框 */}
+            <div ref={previewRef} className="board-resize-preview">
+              <span className="board-resize-badge" />
+            </div>
+          </div>
+        </SortableContext>
+        <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(0.2, 0, 1, 1)" }}>
+          <OverlayCard def={overlayDef} width={overlayW} />
+        </DragOverlay>
+      </DndContext>
+
+      {/* 右下角悬浮按钮（不占网格） */}
+      <div className="board-fab-zone">
+        {fabOpen && (
+          <>
+            <button type="button" className="board-fab-overlay" aria-label="关闭菜单" onClick={() => setFabOpen(false)} />
+            <div className="board-fab-menu">
+              <button type="button" id="fab-new-group" onClick={() => { setModal("group"); setFabOpen(false); }}>
+                <FolderIcon className="w-4 h-4" /> 新建分组
+              </button>
+              <button type="button" id="fab-new-widget" onClick={() => { setModal("widget"); setFabOpen(false); }}>
+                <GridIcon className="w-4 h-4" /> 添加小部件
+              </button>
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          id="fab-main"
+          className={`board-fab ${fabOpen ? "open" : ""}`}
+          title="新建分组 / 添加小部件"
+          onClick={() => setFabOpen((o) => !o)}
+        >
+          <AddIcon className="w-7 h-7" />
+        </button>
+      </div>
+
+      {modal === "group" && (
+        <div className="bf-overlay" onClick={() => setModal(null)}>
+          <div className="bf-panel bf-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="bf-header">
+              <h3 className="bf-title">新建分组</h3>
+              <div className="bf-header-right">
+                <button type="button" className="bf-close" onClick={() => setModal(null)} title="关闭">
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="bm-add">
+              <input
+                id="ng-input"
+                className="bm-input"
+                type="text"
+                placeholder="分组名称，如 AI 工具"
+                autoFocus
+                value={newGroup}
+                onChange={(e) => setNewGroup(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitNewGroup()}
+              />
+              <button type="button" id="ng-create-btn" className="bm-add-btn" disabled={!newGroup.trim()} onClick={submitNewGroup}>
+                创建分组
+              </button>
+            </div>
+            <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
+              新分组卡片出现在网格底部，可拖动、可拉伸
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === "widget" && (
+        <div className="bf-overlay" onClick={() => setModal(null)}>
+          <div className="bf-panel bf-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="bf-header">
+              <h3 className="bf-title">新增 iframe 小部件</h3>
+              <div className="bf-header-right">
+                <button type="button" className="bf-close" onClick={() => setModal(null)} title="关闭">
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="bm-add">
+              <input className="bm-input" type="text" placeholder="标题（可选）" value={wTitle} onChange={(e) => setWTitle(e.target.value)} />
+              <input
+                className="bm-input"
+                type="text"
+                placeholder="网址，如 grafana.example.com"
+                value={wUrl}
+                onChange={(e) => setWUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitWidget()}
+              />
+              <button type="button" className="bm-add-btn" disabled={!wUrl.trim()} onClick={submitWidget}>
+                添加
+              </button>
+            </div>
+            <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
+              添加后出现在网格底部；部分网站禁止内嵌会显示空白，可用卡片右上角 ↗ 打开
+            </div>
+          </div>
+        </div>
+      )}
+
+      {manage && <ManageSheet col={col} target={manage} onClose={() => setManage(null)} />}
+      {browsing && (
+        <FolderBrowser folderId={browsing} data={data} onClose={() => setBrowsing(null)} />
+      )}
+    </div>
+  );
+}
