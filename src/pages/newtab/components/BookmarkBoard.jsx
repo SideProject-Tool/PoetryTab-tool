@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -566,20 +566,6 @@ function resolveDropY(candX, candY, span, draggedH, draggedId, items, heights, c
   return y;
 }
 
-function OverlayCard({ def, width }) {
-  if (!def) return null;
-  const title =
-    def.kind === "qs" ? "常用网站" : def.kind === "iframe" ? def.widget.title : def.folder.title || "未命名";
-  return (
-    <div className="board-widget board-overlay" style={{ width }}>
-      <div className="board-widget-header">
-        <h3 className="board-widget-title">{title}</h3>
-        <span className="board-widget-count">拖动中…</span>
-      </div>
-    </div>
-  );
-}
-
 /* ---------- 看板入口 ---------- */
 
 export default function BookmarkBoard({ col }) {
@@ -612,9 +598,9 @@ export default function BookmarkBoard({ col }) {
 
   /* 网格内的卡片清单：常用网站 + 各分组 + iframe 小部件 */
   const widgetDefs = useMemo(() => {
-    const list = [{ id: "qs:quicksites", kind: "qs" }];
-    for (const f of folders) list.push({ id: "f:" + f.id, kind: "folder", folder: f });
-    for (const w of iframeWidgets) list.push({ id: "w:" + w.id, kind: "iframe", widget: w });
+    const list = [{ id: "qs:quicksites", kind: "qs", title: "常用网站" }];
+    for (const f of folders) list.push({ id: "f:" + f.id, kind: "folder", folder: f, title: f.title || "未命名" });
+    for (const w of iframeWidgets) list.push({ id: "w:" + w.id, kind: "iframe", widget: w, title: w.title || "小部件" });
     return list;
   }, [folders, iframeWidgets]);
   const defMap = useMemo(() => new Map(widgetDefs.map((d) => [d.id, d])), [widgetDefs]);
@@ -667,6 +653,7 @@ export default function BookmarkBoard({ col }) {
   const previewRef = useRef(null);
   const candidateRef = useRef(null); // 拖动落点候选（vx 列, y 行）
   const dragGeomRef = useRef(null); // 拖动抓取几何
+  const overlayRef = useRef(null);
   const rafRef = useRef(0);
   const activeIdRef = useRef(null);
   useEffect(() => {
@@ -870,6 +857,12 @@ export default function BookmarkBoard({ col }) {
       const y = Math.max(0, Math.round(py - g.grabDY - g.gridTop));
       const resolvedY = resolveDropY(col, y, span, draggedH, a, itemsRef.current, heights, cols, colW);
       candidateRef.current = { vx: col, y: resolvedY };
+      // 跟手浮层：左上角 = 指针位置 - 抓取偏移
+      const ov = overlayRef.current;
+      if (ov) {
+        ov.style.left = px - g.grabDX + "px";
+        ov.style.top = py - g.grabDY + "px";
+      }
       // 虚线落点预览（直接改样式，零重渲染）
       const pv = previewRef.current;
       if (pv) {
@@ -1025,11 +1018,17 @@ export default function BookmarkBoard({ col }) {
     <div className={`bookmark-board board-rgl ${gesturing ? "gesturing" : ""} ${activeId ? "dnd-active" : ""}`} ref={boardRef}>
       <DndContext
         sensors={sensors}
-        onDragStart={({ active }) => {
+        onDragStart={({ active, activatorEvent }) => {
           const id = String(active.id);
           activeIdRef.current = id;
           setActiveId(id);
           setOverlayW(active.rect.current.initial?.width || 280);
+          const g0 = dragGeomRef.current;
+          const ov = overlayRef.current;
+          if (g0 && ov && activatorEvent && typeof activatorEvent.clientX === "number") {
+            ov.style.left = activatorEvent.clientX - g0.grabDX + "px";
+            ov.style.top = activatorEvent.clientY - g0.grabDY + "px";
+          }
         }}
         onDragMove={onDragMove}
         onDragEnd={onDragEnd}
@@ -1074,9 +1073,7 @@ export default function BookmarkBoard({ col }) {
             <span className="board-resize-badge" />
           </div>
         </div>
-        <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(0.2, 0, 1, 1)" }}>
-          <OverlayCard def={overlayDef} width={overlayW} />
-        </DragOverlay>
+
       </DndContext>
 
       {/* 右下角悬浮按钮（不占网格） */}
@@ -1104,6 +1101,20 @@ export default function BookmarkBoard({ col }) {
           <AddIcon className="w-7 h-7" />
         </button>
       </div>
+
+      {/* 拖动跟手浮层 */}
+      {overlayDef && (
+        <div
+          ref={overlayRef}
+          className="board-widget board-overlay"
+          style={{ width: overlayW }}
+        >
+          <div className="board-widget-header">
+            <h3 className="board-widget-title">{overlayDef.title}</h3>
+            <span className="board-widget-count">拖动中…</span>
+          </div>
+        </div>
+      )}
 
       {modal === "group" && (
         <div className="bf-overlay" onClick={() => setModal(null)}>
