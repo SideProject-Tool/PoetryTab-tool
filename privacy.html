@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Poetry-Tab 隐私政策</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        padding: 3rem 1.25rem 4rem;
+        font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+        line-height: 1.85;
+        background: #faf7f0;
+        color: #33322e;
+      }
+      main { max-width: 46rem; margin: 0 auto; }
+      h1 { font-size: 1.7rem; margin-bottom: 0.2rem; }
+      h2 { font-size: 1.15rem; margin: 2rem 0 0.6rem; }
+      .meta { opacity: 0.6; font-size: 0.88rem; margin-bottom: 2rem; }
+      code { background: rgba(0,0,0,0.06); padding: 0.1rem 0.4rem; border-radius: 0.4rem; font-size: 0.9em; }
+      a { color: #0d7d7d; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #1f1e1c; color: #d8d5cd; }
+        code { background: rgba(255,255,255,0.1); }
+        a { color: #4ecdc4; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Poetry-Tab 隐私政策</h1>
+      <p class="meta">更新日期：2026-09-20</p>
+
+      <h2>我们收集什么</h2>
+      <p>Poetry-Tab 不收集任何个人身份信息，不含任何统计、追踪或广告组件。</p>
+      <p>扩展与网页版会将你主动创建的内容——<b>收藏分组、书签、常用网站、iframe 小部件、界面设置（主题/搜索引擎/诗词分类）</b>——以 JSON 形式保存到你对应的云端存储空间中。</p>
+
+      <h2>数据存在哪里</h2>
+      <p>你的数据存储在开发者自有域名 <code>sync.pathmemos.com</code>（Cloudflare Workers + R2 对象存储，位于 Cloudflare 全球网络）之下的独立存储路径中，路径以你的<b>用户 ID</b> 命名。服务器自动保留最近 5 个历史版本用于误操作恢复。</p>
+
+      <h2>数据如何被访问</h2>
+      <p>用户 ID 是你数据的唯一访问凭证：在浏览器扩展或网页版输入同一 ID，即可读写同一份数据。请求使用内置令牌进行接口鉴权。除此之外，任何第三方（包括开发者）的网页都无法读取你的数据。</p>
+
+      <h2>我们不做什么</h2>
+      <p>不销售数据、不做用户画像、不投放广告、不嵌入第三方统计脚本、不请求通讯录/浏览历史等浏览器敏感权限（扩展权限仅为空权限列表与自身同步域名）。</p>
+
+      <h2>数据删除</h2>
+      <p>你可以随时通过页面上的联系方式请求删除全部云端数据；或停止使用并清除浏览器本地数据（扩展的 localStorage）。</p>
+
+      <h2>联系方式</h2>
+      <p>如有隐私相关问题，请通过 Chrome Web Store / Edge Add-ons 商家页面的「支持联系方式」与我们联系。</p>
+    </main>
+  </body>
+</html>
