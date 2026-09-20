@@ -8,6 +8,7 @@ import { FONTNAME_LIST } from "./services/constants";
 import { useContentEngine } from "./hooks/useContentEngine";
 import { flattenForSearch } from "./services/collection";
 import { SEARCH_ENGINES } from "./services/constants";
+import { IoSearchOutline as SearchIcon, IoCloseOutline as CloseIcon } from "react-icons/io5";
 
 
 const THEME_NAMES = { light: "cupcake", dark: "halloween" };
@@ -48,10 +49,25 @@ export default function App() {
     document.title = navigator.languages.includes("zh") ? "新标签页" : "New Tab";
   }, []);
 
+  /* 快捷键 S：呼出搜索（焦点在输入框时忽略） */
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target && e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   /* 诗词：按展示类别随机抽取，点击换一首 */
   const { getRandomContent, currentContent } = useContentEngine(settings.cats);
   const [poem, setPoem] = useState(null);
   const [poemFading, setPoemFading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false); // 搜索框默认隐藏，右上角按钮呼出
 
   useEffect(() => {
     getRandomContent();
@@ -107,10 +123,21 @@ export default function App() {
         </div>
       </div>
 
-      {/* 搜索工具行（流式布局，不遮挡诗词） */}
-      <div className="pc-toolbar">
-        <BookmarkSearch items={searchItems} />
-      </div>
+      {/* 搜索开关（右上角，默认隐藏搜索框） */}
+      <button
+        className="search-toggle"
+        onClick={() => setSearchOpen((o) => !o)}
+        title={searchOpen ? "关闭搜索 (Esc)" : "搜索收藏 (S)"}
+        type="button"
+      >
+        {searchOpen ? <CloseIcon className="w-5 h-5" /> : <SearchIcon className="w-5 h-5" />}
+      </button>
+
+      {searchOpen && (
+        <div className="pc-toolbar" onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }}>
+          <BookmarkSearch items={searchItems} />
+        </div>
+      )}
 
       {/* 收藏看板 */}
       <div className="board-region">

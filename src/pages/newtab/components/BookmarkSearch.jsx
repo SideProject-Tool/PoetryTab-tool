@@ -70,6 +70,7 @@ export default function BookmarkSearch({ items = [] }) {
           ref={inputRef}
           type="text"
           className="bookmark-search-input"
+          autoFocus
           placeholder="🔍 搜索收藏…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
