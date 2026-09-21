@@ -140,6 +140,7 @@ export function useCollection() {
 
   const create = useCallback(async (id, password) => {
     setUid(id);
+    setStatus("loading");
     localStorage.setItem(UID_KEY, id);
     const pwToken = await computeAuth(password, id);
     setAuthToken(pwToken);
@@ -163,6 +164,7 @@ export function useCollection() {
 
   const enter = useCallback(async (id, password) => {
     setUid(id);
+    setStatus("loading"); // 立即进入加载态，避免闪现错误卡
     localStorage.setItem(UID_KEY, id);
     const pwToken = await computeAuth(password, id);
     setAuthToken(pwToken);

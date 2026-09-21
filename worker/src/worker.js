@@ -2,7 +2,11 @@
 // 存储：R2 桶（绑定名 BUCKET）
 //   bookmarks/<uid>/latest.json      最新快照
 //   bookmarks/<uid>/snap-<ts>.json   历史快照（保留最近 5 份）
-// 鉴权：Authorization: Bearer <SYNC_TOKEN>（Worker Secret）+ X-Auth: <用户密码令牌>
+// 鉴权：
+//   Authorization: Bearer <SYNC_TOKEN>（应用级，Worker Secret）
+//   X-Auth: <用户密码令牌>（用户级，客户端 SHA-256(password + ":" + uid)，Worker 校验）
+//     - 数据有 auth 字段时 GET/PUT 都需要匹配 X-Auth，否则 403
+//     - 数据无 auth 字段（旧数据/新用户首次 PUT）不校验，首次 PUT 时写入
 // 网页：/ 与静态资源来自 ./public（网页版构建产物），HTML 注入访问令牌
 
 const MAX_BODY = 8 * 1024 * 1024; // 8MB
@@ -46,19 +50,6 @@ async function handleApi(request, env, url) {
   }
   const base = `bookmarks/${encodeURIComponent(uid)}`;
 
-  // 读取现有数据的 auth 令牌
-  const existingObj = await env.BUCKET.get(`${base}/latest.json`);
-  let existingAuth = null;
-  if (existingObj) {
-    try {
-      const existing = await existingObj.json();
-      existingAuth = existing.data?.auth || existing.auth || null;
-    } catch {}
-  }
-
-  // 用户密码令牌（客户端 SHA-256(password + ":" + uid)）
-  const userAuth = request.headers.get("X-Auth") || null;
-
   if (request.method === "PUT") {
     const body = await request.text();
     if (body.length > MAX_BODY) return json({ error: "payload too large (8MB max)" }, 413);
@@ -68,19 +59,6 @@ async function handleApi(request, env, url) {
     } catch {
       return json({ error: "invalid json" }, 400);
     }
-    const newAuth = data.data?.auth || data.auth || null;
-
-    // 已有数据 → 必须验证令牌
-    if (existingAuth) {
-      if (!userAuth || userAuth !== existingAuth) {
-        return json({ error: "auth mismatch" }, 403);
-      }
-    }
-    // 新建数据 → 必须提供 auth
-    if (!newAuth && !existingAuth) {
-      return json({ error: "auth required" }, 400);
-    }
-
     const savedAt = new Date().toISOString();
     const payload = JSON.stringify({ savedAt, data });
     await env.BUCKET.put(`${base}/latest.json`, payload);
@@ -129,6 +107,7 @@ export default {
       return handleApi(request, env, url);
     }
 
+    // 网页版：按路径取静态文件；未命中回退 index.html；HTML 注入访问令牌
     const asset = await env.ASSETS.fetch(new Request("https://assets.local" + url.pathname, request));
     let res = asset.status === 404
       ? await env.ASSETS.fetch("https://assets.local/index.html")
