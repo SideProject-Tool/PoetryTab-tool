@@ -913,13 +913,48 @@ export default function BookmarkBoard({ col }) {
     setModal(null);
   };
 
-  /* 未登录 / ID 不存在：全屏引导门 */
-  if (!hasUid || status === "notfound" || status === "auth-failed") {
-    const isNotFound = status === "notfound";
-    const isAuthFail = status === "auth-failed";
+  /* 未登录：全屏引导门（登录 / 注册） */
+  if (!hasUid) {
     let gatePrefill = "";
     try { gatePrefill = sessionStorage.getItem("gatePrefillUid") || ""; } catch {}
     const clearPrefill = () => { try { sessionStorage.removeItem("gatePrefillUid"); } catch {} };
+    const readForm = () => ({
+      id: (document.getElementById("gate-uid")?.value || "").trim(),
+      pw: document.getElementById("gate-pw")?.value || "",
+    });
+    const doLogin = async () => {
+      const { id, pw } = readForm();
+      if (!id || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
+      clearPrefill();
+      setGateMsg("正在登录…");
+      const r = await col.login(id, pw);
+      if (!r.ok) {
+        setGateMsg(
+          r.code === "bad-id"
+            ? `云端没有「${id}」这个 ID，点「新建用户」即可创建`
+            : r.code === "bad-password"
+              ? "密码错误，请重试"
+              : "网络异常，请稍后重试"
+        );
+      }
+    };
+    const doRegister = async () => {
+      const { id, pw } = readForm();
+      if (!id || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
+      if (pw.length < 6) { setGateMsg("密码至少 6 位"); return; }
+      clearPrefill();
+      setGateMsg("正在创建…");
+      const r = await col.register(id, pw);
+      if (!r.ok) {
+        setGateMsg(
+          r.code === "exists"
+            ? "该 ID 已被注册，请直接登录"
+            : r.code === "bad-id"
+              ? "ID 需 2-32 位（字母/数字/汉字/_/-）"
+              : "网络异常，请稍后重试"
+        );
+      }
+    };
     return (
       <div className="gate-screen" ref={boardRef}>
         <div className="gate-deco" aria-hidden="true">
@@ -955,7 +990,7 @@ export default function BookmarkBoard({ col }) {
               spellCheck="false"
               autoCapitalize="off"
               autoComplete="off"
-              defaultValue={gatePrefill || (isNotFound ? col.uid : undefined)}
+              defaultValue={gatePrefill || undefined}
               onKeyDown={(e) => {
                 if (e.key === "Enter") document.getElementById("gate-pw")?.focus();
               }}
@@ -964,57 +999,38 @@ export default function BookmarkBoard({ col }) {
               id="gate-pw"
               className="gate-input"
               type="password"
-              placeholder="密码（至少 4 位）"
+              placeholder="密码（登录或设置，至少 6 位）"
               autoComplete="new-password"
               onKeyDown={(e) => {
-                if (e.key !== "Enter") return;
-                const uid = document.getElementById("gate-uid")?.value?.trim();
-                const pw = e.currentTarget.value;
-                if (!uid || !pw) return;
-                clearPrefill();
-                col.enter(uid, pw);
+                if (e.key === "Enter") doLogin();
               }}
             />
-            <button
-              type="button"
-              className="gate-btn primary"
-              onClick={() => {
-                const uid = document.getElementById("gate-uid")?.value?.trim();
-                const pw = document.getElementById("gate-pw")?.value;
-                if (!uid || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
-                clearPrefill();
-                col.enter(uid, pw);
-              }}
-            >
-              进入我的收藏
+            <button type="button" className="gate-btn primary" onClick={doLogin}>
+              登录
             </button>
-            <button
-              type="button"
-              className="gate-btn ghost"
-              onClick={() => {
-                const uid = document.getElementById("gate-uid")?.value?.trim();
-                const pw = document.getElementById("gate-pw")?.value;
-                if (!uid || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
-                if (pw.length < 4) { setGateMsg("密码至少 4 位"); return; }
-                clearPrefill();
-                col.create(uid, pw);
-              }}
-            >
+            <button type="button" className="gate-btn ghost" onClick={doRegister}>
               新建用户
             </button>
           </div>
-          {isNotFound && (
-            <div className="gate-error">云端没有「{col.uid}」这个 ID，点「新建用户」即可创建</div>
-          )}
-          {isAuthFail && <div className="gate-error">密码错误，请重试</div>}
           {gateMsg && <div className="gate-msg">{gateMsg}</div>}
-          <p className="gate-hint">用户 ID 即身份，无需注册；同一 ID 在扩展与网页端共享，请妥善保管</p>
+          <p className="gate-hint">ID + 密码即账号，无需邮箱注册；同一账号在扩展与网页端共享</p>
         </div>
       </div>
     );
   }
 
   if (!data) {
+    if (status === "boot" || status === "loading") {
+      return (
+        <div className="bookmark-board" ref={boardRef}>
+          <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
+            <div className="bf-header">
+              <h3 className="bf-title">正在从云端加载…</h3>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="bookmark-board" ref={boardRef}>
         <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
@@ -1022,8 +1038,8 @@ export default function BookmarkBoard({ col }) {
             <h3 className="bf-title">加载失败</h3>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0 0.8rem 0.8rem" }}>
-            <div className="bt-empty">{col.error || "网络异常，请重试"}</div>
-            <button type="button" className="bm-add-btn" onClick={() => col.load(col.uid)}>
+            <div className="bt-empty">{col.error || "未知错误"}</div>
+            <button type="button" className="bm-add-btn" onClick={() => col.reload()}>
               重试
             </button>
           </div>

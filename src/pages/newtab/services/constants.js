@@ -15,7 +15,6 @@ export const POEM_MAXLINELENGTH = 23;
 
 export const CLOUD_SYNC = {
   url: "https://sync.pathmemos.com",
-  token: "8708836c42b360d0ffb19cec996502a69958392c7f23cb5e",
 };
 
 export const SEARCH_ENGINES = {

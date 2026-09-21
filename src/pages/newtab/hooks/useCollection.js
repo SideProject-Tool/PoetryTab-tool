@@ -8,127 +8,240 @@ import {
   SETTINGS_DEFAULTS,
 } from "../services/collection";
 
-const UID_KEY = "poetryTabUid";
-const CACHE_KEY = "poetryTabCache";
-const AUTH_KEY = "poetryTabAuth";
-const SAVE_DEBOUNCE = 700;
+/*
+ * 用户体系与云同步（v4 全新方案，与旧版协议不兼容）
+ *
+ * 认证流程（密码永不明文传输/存储）：
+ *   注册  客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k) → authKey 提交
+ *   登录  /api/challenge 拿一次性挑战 + 盐 → 重派生 authKey → HMAC(authKey, challenge) 应答
+ *   会话  登录后持无状态令牌（30 天），此后数据读写仅凭令牌
+ *
+ * 状态机 status：
+ *   idle   未登录（显示引导门）
+ *   boot   持会话启动恢复中
+ *   loading 手动加载中
+ *   ready  已就绪
+ *   error  网络异常（error 必有可读信息）
+ *
+ * localStorage：pt.uid / pt.session / pt.cache
+ */
 
-/** 密码 → 认证令牌（SHA-256 hex，异步 SubtleCrypto） */
-async function computeAuth(password, uid) {
-  const data = new TextEncoder().encode(password + ":" + uid);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+const UID_KEY = "pt.uid";
+const SESSION_KEY = "pt.session";
+const CACHE_KEY = "pt.cache";
+const SAVE_DEBOUNCE = 700;
+const ITER_DEFAULT = 600000;
+
+/* ---------- WebCrypto 工具 ---------- */
+const enc = new TextEncoder();
+function bytesToHex(buf) {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function hexToBytes(hexStr) {
+  const a = new Uint8Array(hexStr.length / 2);
+  for (let i = 0; i < a.length; i++) a[i] = parseInt(hexStr.substr(i * 2, 2), 16);
+  return a;
+}
+function randomHex(byteLen) {
+  const a = new Uint8Array(byteLen);
+  crypto.getRandomValues(a);
+  return bytesToHex(a);
+}
+async function hmacHex(keyHex, msg) {
+  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return bytesToHex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
+}
+async function deriveAuthKey(password, saltHex, iterations) {
+  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex), iterations },
+    key,
+    256
+  );
+  return bytesToHex(bits);
 }
 
+/* ---------- API ---------- */
+async function apiPost(path, body) {
+  try {
+    const res = await fetch(CLOUD_SYNC.url + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let json = null;
+    try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
+    return { status: res.status, json };
+  } catch {
+    return { status: 0, json: null }; // 网络不可达
+  }
+}
+async function apiGetData(session) {
+  try {
+    const res = await fetch(CLOUD_SYNC.url + "/api/data", {
+      headers: { Authorization: `Bearer ${session}` },
+    });
+    let json = null;
+    try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
+    return { status: res.status, json };
+  } catch {
+    return { status: 0, json: null };
+  }
+}
+async function apiPutData(session, data) {
+  try {
+    const res = await fetch(CLOUD_SYNC.url + "/api/data", {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    let json = null;
+    try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
+    return { status: res.status, json };
+  } catch {
+    return { status: 0, json: null };
+  }
+}
+
+/* ---------- 本地缓存 ---------- */
 function readCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && parsed.v === 3 ? parsed : null;
+    return parsed && Array.isArray(parsed.folders) ? parsed : null;
   } catch {
     return null;
   }
 }
-
 function writeCache(data) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch {}
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* 容量不足时放弃缓存 */ }
+}
+function defaultData() {
+  return {
+    folders: [{ id: genId("f"), title: "我的收藏", children: [] }],
+    quickSites: [],
+    iframeWidgets: [],
+    settings: { ...SETTINGS_DEFAULTS },
+    layout: [],
+  };
 }
 
+/* ---------- 保存队列：单飞 + 最新优先（并发修改只落一次盘） ---------- */
+let saveChain = Promise.resolve();
+let pendingSnapshot = null;
+let persistFn = null; // 由 hook 注入
+function enqueueSave(snapshot) {
+  pendingSnapshot = snapshot;
+  saveChain = saveChain.then(async () => {
+    const snap = pendingSnapshot;
+    pendingSnapshot = null;
+    if (snap && persistFn) await persistFn(snap);
+  }).catch(() => { /* 失败状态已在 persistFn 中标记 */ });
+}
+
+/* ---------- Hook ---------- */
 export function useCollection() {
   const [uid, setUid] = useState(() => localStorage.getItem(UID_KEY) || "");
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_KEY) || "");
-  const authTokenRef = useRef(authToken);
-  authTokenRef.current = authToken;
+  const [session, setSession] = useState(() => localStorage.getItem(SESSION_KEY) || "");
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const hasUid = Boolean(uid && session);
 
   const [data, setData] = useState(() => readCache());
-  const [status, setStatus] = useState("idle");
+  const [status, setStatus] = useState(() => (session ? "boot" : "idle"));
   const [error, setError] = useState("");
-  const [saveState, setSaveState] = useState("saved");
+  const [saveState, setSaveState] = useState("saved"); // saved | saving | error
   const [savedAt, setSavedAt] = useState("");
   const dataRef = useRef(data);
   const saveTimer = useRef(null);
-  const savingRef = useRef(false);
-  const pendingRef = useRef(false);
-
   useEffect(() => { dataRef.current = data; }, [data]);
 
-  const fetchCollection = useCallback(async (id, token, userAuth) => {
-    const res = await fetch(`${CLOUD_SYNC.url}/api/sync/${encodeURIComponent(id)}`, {
-      headers: { Authorization: `Bearer ${token}`, "X-Auth": userAuth },
-    });
-    if (res.status === 401) return { error: "auth-failed" };
-    if (res.status === 404) return { error: "notfound" };
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+  const applyAuth = useCallback((id, token) => {
+    setUid(id);
+    setSession(token);
+    localStorage.setItem(UID_KEY, id);
+    localStorage.setItem(SESSION_KEY, token);
+  }, []);
+  const clearAuth = useCallback(() => {
+    setUid("");
+    setSession("");
+    localStorage.removeItem(UID_KEY);
+    localStorage.removeItem(SESSION_KEY);
   }, []);
 
-  const saveCollection = useCallback(async (id, token, snapshot, userAuth) => {
-    const res = await fetch(`${CLOUD_SYNC.url}/api/sync/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "X-Auth": userAuth,
-      },
-      body: JSON.stringify(snapshot),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }, []);
-
-  const load = useCallback(async (id, token, pwToken) => {
-    setStatus("loading");
-    setError("");
-    try {
-      const result = await fetchCollection(id, token || CLOUD_SYNC.token, pwToken ?? authTokenRef.current);
-      if (result.error) {
-        setStatus(result.error);
-        setError(result.error);
-        return result.error;
-      }
-      const d = result.data || result;
-      setData(d);
-      writeCache(d);
-      setStatus("ready");
-      return "ok";
-    } catch (e) {
-      setError(e.message);
-      setStatus("error");
-      return "error";
-    }
-  }, [fetchCollection]);
-
-  const persist = useCallback(async (snapshot) => {
+  /* 落库（队列消费端） */
+  const persistNow = useCallback(async (snapshot) => {
     setSaveState("saving");
-    try {
-      const res = await saveCollection(uid, CLOUD_SYNC.token, snapshot, authTokenRef.current);
-      setSavedAt(res.savedAt || "");
+    const r = await apiPutData(sessionRef.current, snapshot);
+    if (r.status === 200) {
+      setSavedAt((r.json && r.json.savedAt) || "");
       setSaveState("saved");
-    } catch (e) {
+    } else {
       setSaveState("error");
-      setError(e.message);
+      setError(r.status === 401 ? "登录已过期，请退出后重新登录" : r.status === 0 ? "网络异常，保存未完成" : `保存失败 (HTTP ${r.status})`);
     }
-  }, [uid, saveCollection]);
+  }, []);
+  useEffect(() => {
+    persistFn = persistNow;
+    return () => { persistFn = null; };
+  }, [persistNow]);
 
-  const flush = useCallback(async () => {
-    if (savingRef.current) { pendingRef.current = true; return; }
-    savingRef.current = true;
-    await persist(dataRef.current);
-    savingRef.current = false;
-    if (pendingRef.current) {
-      pendingRef.current = false;
-      await persist(dataRef.current);
-    }
-  }, [persist]);
+  /* 启动恢复：持会话则静默拉取；令牌失效回门禁 */
+  useEffect(() => {
+    if (!sessionRef.current) return;
+    let alive = true;
+    (async () => {
+      const r = await apiGetData(sessionRef.current);
+      if (!alive) return;
+      if (r.status === 200) {
+        const d = r.json && r.json.data;
+        if (d) {
+          setData(d);
+          writeCache(d);
+          setSavedAt((r.json && r.json.savedAt) || "");
+          setStatus("ready");
+        } else {
+          const fresh = defaultData();
+          setData(fresh);
+          setStatus("ready");
+          enqueueSave(fresh); // 有会话但云端无数据（注册后未落库过）：补一份默认数据
+        }
+        return;
+      }
+      if (r.status === 401) {
+        clearAuth();
+        setData(null);
+        setStatus("idle");
+        return;
+      }
+      setError(r.status === 0 ? "无法连接云端，请检查网络后点击重试" : `云端异常 (HTTP ${r.status})，请稍后重试`);
+      setStatus("error");
+    })();
+    return () => { alive = false; };
+  }, [clearAuth]);
 
+  /* 保存调度 */
   const scheduleSave = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => flush(), SAVE_DEBOUNCE);
-  }, [flush]);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      enqueueSave(dataRef.current);
+    }, SAVE_DEBOUNCE);
+  }, []);
+  const saveNow = useCallback(async () => {
+    if (!sessionRef.current || !dataRef.current) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    enqueueSave(dataRef.current);
+    await saveChain;
+  }, []);
 
+  /** 所有修改经此入口：变更 → 防抖自动保存 */
   const mutate = useCallback((fn) => {
-    if (!uid) return;
+    if (!sessionRef.current) return;
     setData((prev) => {
       const next = fn(prev);
       dataRef.current = next;
@@ -136,86 +249,89 @@ export function useCollection() {
       return next;
     });
     scheduleSave();
-  }, [uid, scheduleSave]);
+  }, [scheduleSave]);
 
-  const create = useCallback(async (id, password) => {
-    setUid(id);
-    setStatus("loading");
-    localStorage.setItem(UID_KEY, id);
-    const pwToken = await computeAuth(password, id);
-    setAuthToken(pwToken);
-    localStorage.setItem(AUTH_KEY, pwToken);
-    authTokenRef.current = pwToken;
-    const fresh = {
-      v: 3,
-      auth: pwToken,
-      folders: [{ id: genId("f"), title: "我的收藏", children: [] }],
-      quickSites: [],
-      iframeWidgets: [],
-      settings: { theme: "sync", engine: "baidu", cats: ["i"] },
-      layout: [],
-    };
+  /* 登录：挑战应答式 */
+  const login = useCallback(async (id, password) => {
+    const c = await apiPost("/api/challenge", { uid: id });
+    if (c.status === 404) return { ok: false, code: "bad-id" };
+    if (c.status !== 200 || !c.json || !c.json.challenge) return { ok: false, code: "network" };
+    const authKey = await deriveAuthKey(password, c.json.salt, c.json.iter || ITER_DEFAULT);
+    const proof = await hmacHex(authKey, c.json.challenge);
+    const r = await apiPost("/api/login", { uid: id, challenge: c.json.challenge, proof });
+    if (r.status === 401) return { ok: false, code: "bad-password" };
+    if (r.status === 404) return { ok: false, code: "bad-id" };
+    if (r.status !== 200 || !r.json || !r.json.session) return { ok: false, code: "network" };
+    applyAuth(id, r.json.session);
+    const d = r.json.data;
+    if (d) {
+      setData(d);
+      writeCache(d);
+      setSavedAt(r.json.savedAt || "");
+    } else {
+      const fresh = defaultData();
+      setData(fresh);
+      writeCache(fresh);
+      enqueueSave(fresh);
+    }
+    setError("");
+    setStatus("ready");
+    return { ok: true };
+  }, [applyAuth]);
+
+  /* 注册：派生 authKey 提交，随后立即落一份默认数据 */
+  const register = useCallback(async (id, password) => {
+    const salt = randomHex(16);
+    const authKey = await deriveAuthKey(password, salt, ITER_DEFAULT);
+    const r = await apiPost("/api/register", { uid: id, salt, authKey, iter: ITER_DEFAULT });
+    if (r.status === 409) return { ok: false, code: "exists" };
+    if (r.status !== 200 || !r.json || !r.json.session) {
+      return { ok: false, code: r.status === 400 && r.json && r.json.error ? "bad-id" : "network" };
+    }
+    applyAuth(id, r.json.session);
+    const fresh = defaultData();
     setData(fresh);
     writeCache(fresh);
+    setError("");
     setStatus("ready");
-    await persist(fresh);
-    return "ok";
-  }, [persist]);
+    enqueueSave(fresh);
+    return { ok: true };
+  }, [applyAuth]);
 
-  const enter = useCallback(
-    async (id, password) => {
-      setUid(id);
-      setStatus("loading"); // 立即进入加载态，避免闪现错误卡
-      setError("");
-      localStorage.setItem(UID_KEY, id);
-      const pwToken = await computeAuth(password, id);
-      setAuthToken(pwToken);
-      localStorage.setItem(AUTH_KEY, pwToken);
-      authTokenRef.current = pwToken;
-      const cached = readCache();
-      if (cached) setData(cached);
-      try {
-        const result = await fetchCollection(id, CLOUD_SYNC.token, pwToken);
-        if (result.error) {
-          setStatus(result.error);
-          setError(result.error);
-          return result.error;
-        }
-        const d = result.data || result;
-        // 旧数据没有密码保护：首次登录即以此密码认领，并规范到 v3 回写云端
-        const final = d.auth ? d : { ...d, v: 3, auth: pwToken };
-        setData(final);
-        writeCache(final);
-        setStatus("ready");
-        if (final !== d) await persist(final);
-        return "ok";
-      } catch (e) {
-        setError(e.message);
-        setStatus("error");
-        return "error";
-      }
-    },
-    [fetchCollection, persist]
-  );
-
-  const saveNow = useCallback(async () => {
-    if (!uid || !dataRef.current) return;
-    await flush();
-  }, [uid, flush]);
+  /* 手动从云端重新拉取 */
+  const reload = useCallback(async () => {
+    if (!sessionRef.current) return;
+    setStatus("loading");
+    setError("");
+    const r = await apiGetData(sessionRef.current);
+    if (r.status === 200 && r.json && r.json.data) {
+      setData(r.json.data);
+      writeCache(r.json.data);
+      setSavedAt(r.json.savedAt || "");
+      setStatus("ready");
+    } else if (r.status === 401) {
+      clearAuth();
+      setData(null);
+      setStatus("idle");
+    } else {
+      setError(r.status === 0 ? "网络异常，请稍后重试" : `云端异常 (HTTP ${r.status})`);
+      setStatus("error");
+    }
+  }, [clearAuth]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(UID_KEY);
+    clearAuth();
     localStorage.removeItem(CACHE_KEY);
-    localStorage.removeItem(AUTH_KEY);
     setUid("");
-    setAuthToken("");
+    setSession("");
     setData(null);
     setStatus("idle");
     setError("");
     setSaveState("saved");
     setSavedAt("");
-  }, []);
+  }, [clearAuth]);
 
+  /* ---------- CRUD ---------- */
   const addItem = useCallback((folderId, item) => mutate((d) => addChildToFolder(d, folderId, { id: genId("b"), dateAdded: Date.now(), ...item })), [mutate]);
   const addFolder = useCallback((parentOrTitle, maybeTitle) => {
     if (maybeTitle !== undefined) return mutate((d) => addChildToFolder(d, parentOrTitle, { id: genId("f"), title: maybeTitle, children: [] }));
@@ -228,11 +344,11 @@ export function useCollection() {
   const updateQuickSite = useCallback((id, patch) => mutate((d) => ({ ...d, quickSites: d.quickSites.map((s) => (s.id === id ? { ...s, ...patch } : s)) })), [mutate]);
   const removeQuickSite = useCallback((id) => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) })), [mutate]);
   const setLayout = useCallback((layout) => mutate((d) => ({ ...d, layout })), [mutate]);
-  const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { theme: "sync", engine: "baidu", cats: ["i"], ...d.settings, ...patch } })), [mutate]);
+  const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } })), [mutate]);
 
   return {
-    uid, hasUid: Boolean(uid), data, status, error, saveState, savedAt,
-    load, enter, create, saveNow, logout,
+    uid, hasUid, data, status, error, saveState, savedAt,
+    login, register, reload, saveNow, logout,
     addItem, addFolder, renameNode, updateNode, removeNode,
     addQuickSite, updateQuickSite, removeQuickSite,
     setLayout, setSettings,

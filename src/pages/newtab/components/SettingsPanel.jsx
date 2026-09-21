@@ -91,14 +91,10 @@ export default function SettingsPanel({ col }) {
   };
 
   const handlePull = useCallback(async () => {
-    if (!col.uid) { setMsg("✗ 先在上方填写用户 ID"); return; }
+    if (!col.uid) { setMsg("✗ 尚未登录"); return; }
     setMsg("正在从云端拉取…");
-    try {
-      await col.load(col.uid);
-      setMsg("✓ 已从云端重新拉取");
-    } catch (e) {
-      setMsg("✗ " + e.message);
-    }
+    await col.reload();
+    setMsg(col.status === "error" ? "✗ " + (col.error || "拉取失败") : "✓ 已从云端重新拉取");
   }, [col]);
 
   const saveLabel =

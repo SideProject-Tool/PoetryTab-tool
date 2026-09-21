@@ -1,16 +1,22 @@
-// Poetry-Tab — 云端同步 + 网页版托管 Worker
+// Poetry-Tab — 用户体系 + 云同步 + 网页版托管 Worker
 // 存储：R2 桶（绑定名 BUCKET）
-//   bookmarks/<uid>/latest.json      最新快照
-//   bookmarks/<uid>/snap-<ts>.json   历史快照（保留最近 5 份）
-// 鉴权：
-//   Authorization: Bearer <SYNC_TOKEN>（应用级，Worker Secret）
-//   X-Auth: <用户密码令牌>（用户级，客户端 SHA-256(password + ":" + uid)，Worker 校验）
-//     - 数据有 auth 字段时 GET/PUT 都需要匹配 X-Auth，否则 403
-//     - 数据无 auth 字段（旧数据/新用户首次 PUT）不校验，首次 PUT 时写入
-// 网页：/ 与静态资源来自 ./public（网页版构建产物），HTML 注入访问令牌
+//   pt/accounts/<uid>.json        账号记录 {v, iter, salt, authKey, createdAt}
+//   pt/data/<uid>.json            最新数据 {savedAt, data}
+//   pt/data/<uid>/snap-<ts>.json  历史快照（保留最近 5 份）
+// 认证（客户端全程不发送明文密码）：
+//   注册：客户端 PBKDF2-SHA256(密码, 随机盐, iter) → authKey，连同盐提交，服务器只存派生结果
+//   登录：/api/challenge 发放带签名的一次性挑战（含盐与迭代次数）→ 客户端 HMAC-SHA256(authKey, challenge) 应答
+//   会话：登录后发放无状态令牌 uid|exp|HMAC(SYNC_TOKEN, uid|exp)，30 天有效
+//     GET/PUT /api/data 仅凭会话令牌，uid 从令牌解析，杜绝越权读写
+// 网页：/ 与静态资源来自 ./public
 
 const MAX_BODY = 8 * 1024 * 1024; // 8MB
 const KEEP_SNAPS = 5;
+const SESSION_TTL = 30 * 24 * 3600; // 30 天（秒）
+const CHALLENGE_TTL = 10 * 60; // 挑战有效期（秒）
+const ITER_DEFAULT = 600000; // PBKDF2 迭代次数（OWASP 推荐）
+
+const UID_RE = /^[\w\u4e00-\u9fa5-]{2,32}$/u; // 2-32 位：字母数字下划线连字符汉字
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -18,39 +24,144 @@ function json(obj, status = 200) {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-      "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Auth",
+      "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
     },
   });
 }
 
-/* ===== 云端同步 API ===== */
+/* ===== 加密工具（Workers WebCrypto） ===== */
+const enc = new TextEncoder();
+function toHex(buf) {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function fromHex(h) {
+  const a = new Uint8Array(h.length / 2);
+  for (let i = 0; i < a.length; i++) a[i] = parseInt(h.substr(i * 2, 2), 16);
+  return a;
+}
+function timingSafeEq(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+async function hmacRaw(keyBuf, msg) {
+  const key = await crypto.subtle.importKey("raw", keyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return toHex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
+}
+async function hmacHex(secretStr, msg) {
+  return hmacRaw(enc.encode(secretStr), msg);
+}
+/* authKey 以原始字节参与 HMAC（与客户端 deriveBits 输出一致，切勿按文本编码） */
+async function hmacAuthKey(authKeyHex, msg) {
+  return hmacRaw(fromHex(authKeyHex), msg);
+}
+
+/* ===== 会话令牌：uid|exp|签名（无状态） ===== */
+async function makeSession(env, uid) {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL;
+  return `${uid}|${exp}|${await hmacHex(env.SYNC_TOKEN, `${uid}|${exp}`)}`;
+}
+async function readSession(env, request) {
+  const m = (request.headers.get("Authorization") || "").match(/^Bearer (\S+)$/);
+  if (!m) return null;
+  const parts = m[1].split("|");
+  if (parts.length !== 3) return null;
+  const [uid, exp, sig] = parts;
+  if (!timingSafeEq(sig, await hmacHex(env.SYNC_TOKEN, `${uid}|${exp}`))) return null;
+  if (Number(exp) * 1000 < Date.now()) return null;
+  return uid;
+}
+
+async function readBody(request) {
+  const text = await request.text();
+  if (text.length > MAX_BODY) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function readAccount(env, uid) {
+  const obj = await env.BUCKET.get(`pt/accounts/${uid}.json`);
+  if (!obj) return null;
+  try {
+    return await obj.json();
+  } catch {
+    return null;
+  }
+}
+
+/* ===== API ===== */
 async function handleApi(request, env, url) {
   if (url.pathname === "/api/health") {
     return json({ ok: true, time: new Date().toISOString() });
   }
 
-  const auth = request.headers.get("Authorization") || "";
-  if (!env.SYNC_TOKEN || auth !== `Bearer ${env.SYNC_TOKEN}`) {
-    return json({ error: "unauthorized" }, 401);
+  const p = url.pathname;
+
+  /* 注册：{uid, salt, authKey, iter} → {session} */
+  if (p === "/api/register" && request.method === "POST") {
+    const b = await readBody(request);
+    if (!b) return json({ error: "invalid body" }, 400);
+    const uid = String(b.uid || "").trim();
+    if (!UID_RE.test(uid)) return json({ error: "ID 需 2-32 位（字母/数字/汉字/_/-）" }, 400);
+    if (!/^[0-9a-f]{32}$/.test(b.salt || "")) return json({ error: "bad salt" }, 400);
+    if (!/^[0-9a-f]{64}$/.test(b.authKey || "")) return json({ error: "bad authKey" }, 400);
+    const iter = Number(b.iter) || ITER_DEFAULT;
+    if (iter < 100000 || iter > 2000000) return json({ error: "bad iter" }, 400);
+    if (await readAccount(env, uid)) return json({ error: "exists" }, 409);
+    const account = { v: 1, iter, salt: b.salt, authKey: b.authKey, createdAt: new Date().toISOString() };
+    await env.BUCKET.put(`pt/accounts/${uid}.json`, JSON.stringify(account));
+    return json({ ok: true, session: await makeSession(env, uid) });
   }
 
-  const m = url.pathname.match(/^\/api\/sync\/([^/]+)$/);
-  if (!m) return json({ error: "not found" }, 404);
-
-  let uid;
-  try {
-    uid = decodeURIComponent(m[1]);
-  } catch {
-    return json({ error: "bad uid" }, 400);
+  /* 登录第一步：拿挑战（附带该账号的盐与迭代次数） */
+  if (p === "/api/challenge" && request.method === "POST") {
+    const b = await readBody(request);
+    const uid = String((b && b.uid) || "").trim();
+    const account = await readAccount(env, uid);
+    if (!account) return json({ error: "notfound" }, 404);
+    const ts = Math.floor(Date.now() / 1000);
+    const challenge = `${ts}|${await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}`)}`;
+    return json({ challenge, salt: account.salt, iter: account.iter });
   }
-  uid = uid.trim();
-  if (!uid || uid.length > 64 || /[\\/]/.test(uid)) {
-    return json({ error: "invalid uid（1-64 字符，不含斜杠）" }, 400);
-  }
-  const base = `bookmarks/${encodeURIComponent(uid)}`;
 
-  if (request.method === "PUT") {
+  /* 登录第二步：{uid, challenge, proof} → {session, data} */
+  if (p === "/api/login" && request.method === "POST") {
+    const b = await readBody(request);
+    if (!b) return json({ error: "invalid body" }, 400);
+    const uid = String(b.uid || "").trim();
+    const account = await readAccount(env, uid);
+    if (!account) return json({ error: "notfound" }, 404);
+    const m = String(b.challenge || "").match(/^(\d+)\|([0-9a-f]{64})$/);
+    if (!m) return json({ error: "bad challenge" }, 400);
+    const ts = Number(m[1]);
+    if (timingSafeEq(m[2], await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}`)) === false) {
+      return json({ error: "bad challenge" }, 400);
+    }
+    if (Math.floor(Date.now() / 1000) - ts > CHALLENGE_TTL) return json({ error: "challenge expired" }, 400);
+    const expected = await hmacAuthKey(account.authKey, b.challenge);
+    if (!timingSafeEq(String(b.proof || ""), expected)) return json({ error: "bad proof" }, 401);
+    const obj = await env.BUCKET.get(`pt/data/${uid}.json`);
+    const payload = obj ? await obj.json() : { savedAt: null, data: null };
+    return json({ ok: true, session: await makeSession(env, uid), savedAt: payload.savedAt, data: payload.data });
+  }
+
+  /* 数据读写：仅凭会话令牌，uid 从令牌解析 */
+  if (p === "/api/data" && request.method === "GET") {
+    const uid = await readSession(env, request);
+    if (!uid) return json({ error: "unauthorized" }, 401);
+    const obj = await env.BUCKET.get(`pt/data/${uid}.json`);
+    if (!obj) return json({ savedAt: null, data: null });
+    return json(await obj.json());
+  }
+
+  if (p === "/api/data" && request.method === "PUT") {
+    const uid = await readSession(env, request);
+    if (!uid) return json({ error: "unauthorized" }, 401);
     const body = await request.text();
     if (body.length > MAX_BODY) return json({ error: "payload too large (8MB max)" }, 413);
     let data;
@@ -59,57 +170,31 @@ async function handleApi(request, env, url) {
     } catch {
       return json({ error: "invalid json" }, 400);
     }
-    // 密码保护：已有 auth 的数据必须携带匹配的 X-Auth 才能覆盖；auth 以服务端为准
-    const cur = await env.BUCKET.get(`${base}/latest.json`);
-    let storedAuth = null;
-    if (cur) {
-      try {
-        storedAuth = (await cur.json())?.data?.auth || null;
-      } catch {}
+    if (!data || typeof data !== "object" || !Array.isArray(data.folders)) {
+      return json({ error: "invalid data shape" }, 400);
     }
-    if (storedAuth && request.headers.get("X-Auth") !== storedAuth) {
-      return json({ error: "auth failed" }, 401);
-    }
-    if (storedAuth) data.auth = storedAuth;
     const savedAt = new Date().toISOString();
     const payload = JSON.stringify({ savedAt, data });
-    await env.BUCKET.put(`${base}/latest.json`, payload);
-    await env.BUCKET.put(`${base}/snap-${Date.now()}.json`, payload);
-    const snaps = await env.BUCKET.list({ prefix: `${base}/snap-` });
+    await env.BUCKET.put(`pt/data/${uid}.json`, payload);
+    await env.BUCKET.put(`pt/data/${uid}/snap-${Date.now()}.json`, payload);
+    const snaps = await env.BUCKET.list({ prefix: `pt/data/${uid}/snap-` });
     const sorted = (snaps.objects || []).sort(
       (a, b) => (b.uploaded ? b.uploaded.getTime() : 0) - (a.uploaded ? a.uploaded.getTime() : 0)
     );
     for (const old of sorted.slice(KEEP_SNAPS)) {
       await env.BUCKET.delete(old.key);
     }
-    return json({ ok: true, uid, savedAt });
+    return json({ ok: true, savedAt });
   }
 
-  if (request.method === "GET") {
-    const obj = await env.BUCKET.get(`${base}/latest.json`);
-    if (!obj) return json({ error: "not found" }, 404);
-    let payload;
-    try {
-      payload = await obj.json();
-    } catch {
-      return json({ error: "corrupt snapshot" }, 500);
-    }
-    // 密码保护：数据带 auth 字段时必须携带匹配的 X-Auth，否则 401
-    const storedAuth = payload?.data?.auth;
-    if (storedAuth && request.headers.get("X-Auth") !== storedAuth) {
-      return json({ error: "auth failed" }, 401);
-    }
-    return json(payload);
-  }
-
-  return json({ error: "method not allowed" }, 405);
+  return json({ error: "not found" }, 404);
 }
 
 /* ===== CORS 预检 ===== */
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Auth",
+  "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -125,20 +210,13 @@ export default {
       return handleApi(request, env, url);
     }
 
-    // 网页版：按路径取静态文件；未命中回退 index.html；HTML 注入访问令牌
+    // 网页版：按路径取静态文件；未命中回退 index.html
     const asset = await env.ASSETS.fetch(new Request("https://assets.local" + url.pathname, request));
-    let res = asset.status === 404
-      ? await env.ASSETS.fetch("https://assets.local/index.html")
-      : asset;
-
-    const type = res.headers.get("Content-Type") || "";
-    if (type.includes("text/html")) {
-      let html = await res.text();
-      html = html.replaceAll("__SYNC_TOKEN__", env.SYNC_TOKEN || "");
-      res = new Response(html, { status: res.status, headers: res.headers });
+    let res = asset.status === 404 ? await env.ASSETS.fetch("https://assets.local/index.html") : asset;
+    if ((res.headers.get("Content-Type") || "").includes("text/html")) {
+      res = new Response(res.body, { status: res.status, headers: res.headers });
       res.headers.set("Cache-Control", "no-store");
     }
-
     return res;
   },
 };
