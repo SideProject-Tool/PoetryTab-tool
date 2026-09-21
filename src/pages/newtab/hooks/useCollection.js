@@ -194,7 +194,7 @@ export function useCollection() {
 
   return {
     uid, hasUid: Boolean(uid), data, status, error, saveState, savedAt,
-    load, enter, create, saveNow,
+    load, enter, create, saveNow, logout,
     addItem, addFolder, renameNode, updateNode, removeNode,
     addQuickSite, updateQuickSite, removeQuickSite,
     setLayout, setSettings,

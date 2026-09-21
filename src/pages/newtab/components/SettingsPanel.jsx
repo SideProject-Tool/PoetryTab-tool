@@ -197,6 +197,14 @@ export default function SettingsPanel({ col }) {
             <span className="settings-row-value">打开 ↗</span>
           </button>
 
+          <button className="settings-row" onClick={() => col.logout()} type="button" title="退出登录，返回引导页">
+            <span className="settings-row-icon">
+              <LogoutIcon className="w-5 h-5" />
+            </span>
+            <span className="settings-row-label">退出登录</span>
+            <span className="settings-row-value">退出</span>
+          </button>
+
           {msg && (
             <div className={`settings-sync-msg ${msg.startsWith("✗") ? "error" : ""}`}>{msg}</div>
           )}
