@@ -914,8 +914,9 @@ export default function BookmarkBoard({ col }) {
   };
 
   /* 未登录 / ID 不存在：全屏引导门 */
-  if (!hasUid || status === "notfound") {
+  if (!hasUid || status === "notfound" || status === "auth-failed") {
     const isNotFound = status === "notfound";
+    const isAuthFail = status === "auth-failed";
     return (
       <div className="gate-screen" ref={boardRef}>
         <div className="gate-deco" aria-hidden="true">
@@ -955,10 +956,27 @@ export default function BookmarkBoard({ col }) {
                 if (e.key === "Enter") col.enter(e.currentTarget.value.trim());
               }}
             />
+            <input
+              id="gate-pw"
+              className="gate-input"
+              type="password"
+              placeholder="密码"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                const uid = document.getElementById("gate-uid")?.value?.trim();
+                const pw = e.currentTarget.value;
+                if (!uid || !pw) return;
+                col.enter(uid, pw);
+              }}
+            />
             <button
               type="button"
               className="gate-btn primary"
-              onClick={() => col.enter(document.getElementById("gate-uid").value.trim())}
+              onClick={() => {
+                const uid = document.getElementById("gate-uid")?.value?.trim();
+                const pw = document.getElementById("gate-pw")?.value;
+                if (uid && pw) col.enter(uid, pw);
+              }}
             >
               进入我的收藏
             </button>
@@ -966,14 +984,11 @@ export default function BookmarkBoard({ col }) {
               type="button"
               className="gate-btn ghost"
               onClick={() => {
-                const v = document.getElementById("gate-uid").value.trim();
-                if (v) {
-                  col.create(v);
-                  return;
-                }
-                const gen = "tab-" + Math.random().toString(36).slice(2, 8);
-                document.getElementById("gate-uid").value = gen;
-                setGateMsg("已为你生成用户 ID：" + gen + "，再次点击完成创建");
+                const uid = document.getElementById("gate-uid")?.value?.trim();
+                const pw = document.getElementById("gate-pw")?.value;
+                if (!uid || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
+                if (pw.length < 4) { setGateMsg("密码至少 4 位"); return; }
+                col.create(uid, pw);
               }}
             >
               新建用户
@@ -982,6 +997,7 @@ export default function BookmarkBoard({ col }) {
           {isNotFound && (
             <div className="gate-error">云端没有「{col.uid}」这个 ID，点「新建用户」即可创建</div>
           )}
+          {isAuthFail && <div className="gate-error">密码错误，请重试</div>}
           {gateMsg && <div className="gate-msg">{gateMsg}</div>}
           <p className="gate-hint">用户 ID 即身份，无需注册；同一 ID 在扩展与网页端共享，请妥善保管</p>
         </div>
