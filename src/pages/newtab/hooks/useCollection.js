@@ -182,8 +182,8 @@ export function useCollection() {
           return result.error;
         }
         const d = result.data || result;
-        // 旧数据没有密码保护：首次登录即以此密码认领，回写云端后生效
-        const final = d.auth ? d : { ...d, auth: pwToken };
+        // 旧数据没有密码保护：首次登录即以此密码认领，并规范到 v3 回写云端
+        const final = d.auth ? d : { ...d, v: 3, auth: pwToken };
         setData(final);
         writeCache(final);
         setStatus("ready");
