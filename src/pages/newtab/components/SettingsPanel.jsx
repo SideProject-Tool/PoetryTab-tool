@@ -11,6 +11,7 @@ import {
   IoCloudDownloadOutline as DownloadIcon,
   IoCloudOutline as CloudIcon,
   IoGlobeOutline as GlobeIcon,
+  IoLogOutOutline as LogoutIcon,
 } from "react-icons/io5";
 import { MdTimelapse as SyncIcon } from "react-icons/md";
 import { SEARCH_ENGINES } from "../services/constants";
@@ -79,22 +80,13 @@ export default function SettingsPanel({ col }) {
     col.setSettings({ cats });
   };
 
-  const handleUidKey = async (e) => {
+  const handleUidKey = (e) => {
     if (e.key !== "Enter") return;
     const v = e.currentTarget.value.trim();
     if (!v || v === col.uid) { setUidDraft(null); return; }
-    setMsg("正在加载…");
-    const r = await col.enter(v);
-    if (r === "notfound") {
-      if (confirm(`ID「${v}」不存在，新建空收藏夹？`)) {
-        await col.create(v);
-        setMsg("");
-      } else {
-        setMsg("✗ 已取消");
-      }
-    } else {
-      setMsg(r === "ok" ? "✓ 已打开" : "✗ " + (col.error || "加载失败"));
-    }
+    // 切换 ID：退出到引导门并预填新 ID，密码在引导门输入（受保护账号必须验密码）
+    try { sessionStorage.setItem("gatePrefillUid", v); } catch {}
+    col.logout();
     setUidDraft(null);
   };
 
@@ -156,7 +148,7 @@ export default function SettingsPanel({ col }) {
             <input
               className="settings-sync-input"
               type="text"
-              placeholder="如 xiaoming（回车加载，新 ID 自动创建）"
+              placeholder="当前 ID；输入新 ID 回车切换登录"
               value={uidDraft !== null ? uidDraft : col.uid}
               onChange={(e) => setUidDraft(e.target.value)}
               onKeyDown={handleUidKey}

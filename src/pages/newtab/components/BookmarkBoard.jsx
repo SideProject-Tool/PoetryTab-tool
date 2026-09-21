@@ -917,6 +917,9 @@ export default function BookmarkBoard({ col }) {
   if (!hasUid || status === "notfound" || status === "auth-failed") {
     const isNotFound = status === "notfound";
     const isAuthFail = status === "auth-failed";
+    let gatePrefill = "";
+    try { gatePrefill = sessionStorage.getItem("gatePrefillUid") || ""; } catch {}
+    const clearPrefill = () => { try { sessionStorage.removeItem("gatePrefillUid"); } catch {} };
     return (
       <div className="gate-screen" ref={boardRef}>
         <div className="gate-deco" aria-hidden="true">
@@ -951,21 +954,22 @@ export default function BookmarkBoard({ col }) {
               placeholder="输入用户 ID"
               spellCheck="false"
               autoCapitalize="off"
-              defaultValue={isNotFound ? col.uid : undefined}
+              defaultValue={gatePrefill || (isNotFound ? col.uid : undefined)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") col.enter(e.currentTarget.value.trim());
+                if (e.key === "Enter") document.getElementById("gate-pw")?.focus();
               }}
             />
             <input
               id="gate-pw"
               className="gate-input"
               type="password"
-              placeholder="密码"
+              placeholder="密码（至少 4 位）"
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
                 const uid = document.getElementById("gate-uid")?.value?.trim();
                 const pw = e.currentTarget.value;
                 if (!uid || !pw) return;
+                clearPrefill();
                 col.enter(uid, pw);
               }}
             />
@@ -975,7 +979,9 @@ export default function BookmarkBoard({ col }) {
               onClick={() => {
                 const uid = document.getElementById("gate-uid")?.value?.trim();
                 const pw = document.getElementById("gate-pw")?.value;
-                if (uid && pw) col.enter(uid, pw);
+                if (!uid || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
+                clearPrefill();
+                col.enter(uid, pw);
               }}
             >
               进入我的收藏
@@ -988,6 +994,7 @@ export default function BookmarkBoard({ col }) {
                 const pw = document.getElementById("gate-pw")?.value;
                 if (!uid || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
                 if (pw.length < 4) { setGateMsg("密码至少 4 位"); return; }
+                clearPrefill();
                 col.create(uid, pw);
               }}
             >

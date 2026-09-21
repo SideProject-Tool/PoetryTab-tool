@@ -12,15 +12,13 @@ if [ -f dist-web/web/index.html ]; then
   rm -rf dist-web/web
 fi
 
-# 3) 同步到控制机上的 Worker 项目目录
+# 3) 同步到控制机上的 Worker 项目目录（worker.js 以本仓库为准；wrangler.toml 沿用服务器上的）
 SERVER=root@192.168.1.44
 DEST=/root/proton-collect-worker
-WORKER_SRC=../ext-test/worker
 
 ssh $SERVER "rm -rf $DEST/public && mkdir -p $DEST/public"
 scp -r dist-web/. $SERVER:$DEST/public/
-scp $WORKER_SRC/src/worker.js $SERVER:$DEST/src/worker.js
-scp $WORKER_SRC/wrangler.toml $SERVER:$DEST/wrangler.toml
+scp worker/src/worker.js $SERVER:$DEST/src/worker.js
 
 # 4) 服务器端部署（凭据在 /root/.secrets.env）
 ssh $SERVER "bash -lc 'export PATH=/root/AgentTool/bin:\$PATH; source /root/.secrets.env 2>/dev/null; cd $DEST && wrangler deploy' 2>&1 | tail -3"

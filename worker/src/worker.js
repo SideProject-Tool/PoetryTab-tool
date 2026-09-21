@@ -59,6 +59,18 @@ async function handleApi(request, env, url) {
     } catch {
       return json({ error: "invalid json" }, 400);
     }
+    // 密码保护：已有 auth 的数据必须携带匹配的 X-Auth 才能覆盖；auth 以服务端为准
+    const cur = await env.BUCKET.get(`${base}/latest.json`);
+    let storedAuth = null;
+    if (cur) {
+      try {
+        storedAuth = (await cur.json())?.data?.auth || null;
+      } catch {}
+    }
+    if (storedAuth && request.headers.get("X-Auth") !== storedAuth) {
+      return json({ error: "auth failed" }, 401);
+    }
+    if (storedAuth) data.auth = storedAuth;
     const savedAt = new Date().toISOString();
     const payload = JSON.stringify({ savedAt, data });
     await env.BUCKET.put(`${base}/latest.json`, payload);
@@ -76,12 +88,18 @@ async function handleApi(request, env, url) {
   if (request.method === "GET") {
     const obj = await env.BUCKET.get(`${base}/latest.json`);
     if (!obj) return json({ error: "not found" }, 404);
-    return new Response(obj.body, {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
+    let payload;
+    try {
+      payload = await obj.json();
+    } catch {
+      return json({ error: "corrupt snapshot" }, 500);
+    }
+    // 密码保护：数据带 auth 字段时必须携带匹配的 X-Auth，否则 401
+    const storedAuth = payload?.data?.auth;
+    if (storedAuth && request.headers.get("X-Auth") !== storedAuth) {
+      return json({ error: "auth failed" }, 401);
+    }
+    return json(payload);
   }
 
   return json({ error: "method not allowed" }, 405);

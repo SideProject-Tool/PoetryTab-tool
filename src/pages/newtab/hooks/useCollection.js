@@ -81,7 +81,7 @@ export function useCollection() {
     setStatus("loading");
     setError("");
     try {
-      const result = await fetchCollection(id, token, pwToken);
+      const result = await fetchCollection(id, token || CLOUD_SYNC.token, pwToken ?? authTokenRef.current);
       if (result.error) {
         setStatus(result.error);
         setError(result.error);
@@ -162,18 +162,41 @@ export function useCollection() {
     return "ok";
   }, [persist]);
 
-  const enter = useCallback(async (id, password) => {
-    setUid(id);
-    setStatus("loading"); // 立即进入加载态，避免闪现错误卡
-    localStorage.setItem(UID_KEY, id);
-    const pwToken = await computeAuth(password, id);
-    setAuthToken(pwToken);
-    localStorage.setItem(AUTH_KEY, pwToken);
-    authTokenRef.current = pwToken;
-    const cached = readCache();
-    if (cached) setData(cached);
-    return load(id, CLOUD_SYNC.token, pwToken);
-  }, [load]);
+  const enter = useCallback(
+    async (id, password) => {
+      setUid(id);
+      setStatus("loading"); // 立即进入加载态，避免闪现错误卡
+      setError("");
+      localStorage.setItem(UID_KEY, id);
+      const pwToken = await computeAuth(password, id);
+      setAuthToken(pwToken);
+      localStorage.setItem(AUTH_KEY, pwToken);
+      authTokenRef.current = pwToken;
+      const cached = readCache();
+      if (cached) setData(cached);
+      try {
+        const result = await fetchCollection(id, CLOUD_SYNC.token, pwToken);
+        if (result.error) {
+          setStatus(result.error);
+          setError(result.error);
+          return result.error;
+        }
+        const d = result.data || result;
+        // 旧数据没有密码保护：首次登录即以此密码认领，回写云端后生效
+        const final = d.auth ? d : { ...d, auth: pwToken };
+        setData(final);
+        writeCache(final);
+        setStatus("ready");
+        if (final !== d) await persist(final);
+        return "ok";
+      } catch (e) {
+        setError(e.message);
+        setStatus("error");
+        return "error";
+      }
+    },
+    [fetchCollection, persist]
+  );
 
   const saveNow = useCallback(async () => {
     if (!uid || !dataRef.current) return;
