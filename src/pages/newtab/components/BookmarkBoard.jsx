@@ -954,6 +954,7 @@ export default function BookmarkBoard({ col }) {
               placeholder="输入用户 ID"
               spellCheck="false"
               autoCapitalize="off"
+              autoComplete="off"
               defaultValue={gatePrefill || (isNotFound ? col.uid : undefined)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") document.getElementById("gate-pw")?.focus();
@@ -964,6 +965,7 @@ export default function BookmarkBoard({ col }) {
               className="gate-input"
               type="password"
               placeholder="密码（至少 4 位）"
+              autoComplete="new-password"
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
                 const uid = document.getElementById("gate-uid")?.value?.trim();

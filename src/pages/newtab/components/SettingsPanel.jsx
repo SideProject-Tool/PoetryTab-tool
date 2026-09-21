@@ -153,6 +153,7 @@ export default function SettingsPanel({ col }) {
               onChange={(e) => setUidDraft(e.target.value)}
               onKeyDown={handleUidKey}
               spellCheck="false"
+              autoComplete="off"
             />
           </div>
 
