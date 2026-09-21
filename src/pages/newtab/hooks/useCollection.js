@@ -178,6 +178,19 @@ export function useCollection() {
     await flush();
   }, [uid, flush]);
 
+  const logout = useCallback(() => {
+    localStorage.removeItem(UID_KEY);
+    localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(AUTH_KEY);
+    setUid("");
+    setAuthToken("");
+    setData(null);
+    setStatus("idle");
+    setError("");
+    setSaveState("saved");
+    setSavedAt("");
+  }, []);
+
   const addItem = useCallback((folderId, item) => mutate((d) => addChildToFolder(d, folderId, { id: genId("b"), dateAdded: Date.now(), ...item })), [mutate]);
   const addFolder = useCallback((parentOrTitle, maybeTitle) => {
     if (maybeTitle !== undefined) return mutate((d) => addChildToFolder(d, parentOrTitle, { id: genId("f"), title: maybeTitle, children: [] }));
