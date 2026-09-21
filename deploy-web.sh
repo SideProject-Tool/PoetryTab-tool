@@ -6,11 +6,13 @@ cd "$(dirname "$0")"
 # 1) 构建共享 React 应用（网页目标）
 pnpm exec vite build --config vite.web.config.mjs
 
-# 2) 入口 HTML 归位到产物根目录
+# 2) 入口 HTML 归位到产物根目录；补齐扩展侧共用的图标资源
 if [ -f dist-web/web/index.html ]; then
   mv dist-web/web/index.html dist-web/index.html
   rm -rf dist-web/web
 fi
+rm -rf dist-web/icon
+cp -r .output/chrome-mv3/icon dist-web/icon
 
 # 3) 同步到控制机上的 Worker 项目目录（worker.js 以本仓库为准；wrangler.toml 沿用服务器上的）
 SERVER=root@192.168.1.44

@@ -17,7 +17,7 @@ import {
   IoCloudOutline as CloudSyncIcon,
 } from "react-icons/io5";
 import { openUrl } from "../../../platform";
-import { findNode } from "../services/collection";
+import { findNode, safeUrl } from "../services/collection";
 import { colsForWidth, REF_COLS } from "../grid";
 
 /**
@@ -242,8 +242,8 @@ function ManageSheet({ col, target, onClose }) {
   const title = isQs ? "常用网站" : node ? node.title || "未命名" : "";
 
   const submitAdd = () => {
-    if (!nUrl.trim()) return;
-    const url = /^https?:\/\//i.test(nUrl.trim()) ? nUrl.trim() : "https://" + nUrl.trim();
+    const url = safeUrl(nUrl);
+    if (!url) return;
     const t = nTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
     if (isQs) col.addQuickSite({ title: t, url });
     else col.addItem(target.id, { title: t, url });
@@ -317,7 +317,8 @@ function ManageSheet({ col, target, onClose }) {
                   className="bm-op"
                   title="保存"
                   onClick={() => {
-                    const url = /^https?:\/\//i.test(eUrl.trim()) ? eUrl.trim() : "https://" + eUrl.trim();
+                    const url = safeUrl(eUrl);
+                    if (!url) return;
                     if (isQs) col.updateQuickSite(item.id, { title: eTitle.trim() || url, url });
                     else col.updateNode(item.id, { title: eTitle.trim() || url, url });
                     setEditId(null);
@@ -905,9 +906,9 @@ export default function BookmarkBoard({ col }) {
     setModal(null);
   };
   const submitWidget = () => {
-    if (!wUrl.trim()) return;
-    const url = /^https?:\/\//i.test(wUrl.trim()) ? wUrl.trim() : "https://" + wUrl.trim();
-    col.addIframe({ title: wTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""), url, width: 560 });
+    const url = safeUrl(wUrl);
+    if (!url) return;
+    col.addIframe({ title: wTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""), url });
     setWTitle("");
     setWUrl("");
     setModal(null);

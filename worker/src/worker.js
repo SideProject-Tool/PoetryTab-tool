@@ -173,6 +173,19 @@ async function handleApi(request, env, url) {
     if (!data || typeof data !== "object" || !Array.isArray(data.folders)) {
       return json({ error: "invalid data shape" }, 400);
     }
+    // 乐观锁：云端已有数据时，请求必须携带与其 savedAt 一致的 X-Base-SavedAt，
+    // 否则 409（多设备并发保存，后到的整份写入会让先到的丢失）
+    const cur = await env.BUCKET.get(`pt/data/${uid}.json`);
+    if (cur) {
+      let curPayload = null;
+      try {
+        curPayload = await cur.json();
+      } catch { /* 损坏快照按无版本处理 */ }
+      const curSavedAt = curPayload && curPayload.savedAt;
+      if (curSavedAt && request.headers.get("X-Base-SavedAt") !== curSavedAt) {
+        return json({ error: "conflict", savedAt: curSavedAt }, 409);
+      }
+    }
     const savedAt = new Date().toISOString();
     const payload = JSON.stringify({ savedAt, data });
     await env.BUCKET.put(`pt/data/${uid}.json`, payload);

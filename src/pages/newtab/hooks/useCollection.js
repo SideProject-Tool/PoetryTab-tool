@@ -88,11 +88,15 @@ async function apiGetData(session) {
     return { status: 0, json: null };
   }
 }
-async function apiPutData(session, data) {
+async function apiPutData(session, data, baseSavedAt) {
   try {
     const res = await fetch(CLOUD_SYNC.url + "/api/data", {
       method: "PUT",
-      headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${session}`,
+        "Content-Type": "application/json",
+        "X-Base-SavedAt": baseSavedAt || "",
+      },
       body: JSON.stringify(data),
     });
     let json = null;
@@ -126,6 +130,18 @@ function defaultData() {
     layout: [],
   };
 }
+/** 云端数据兜底：数组字段缺失/损坏时补默认值 */
+function ensureShape(d) {
+  if (!d || typeof d !== "object") return defaultData();
+  return {
+    ...d,
+    folders: Array.isArray(d.folders) ? d.folders : [],
+    quickSites: Array.isArray(d.quickSites) ? d.quickSites : [],
+    iframeWidgets: Array.isArray(d.iframeWidgets) ? d.iframeWidgets : [],
+    layout: Array.isArray(d.layout) ? d.layout : [],
+    settings: { ...SETTINGS_DEFAULTS, ...(d.settings || {}) },
+  };
+}
 
 /* ---------- 保存队列：单飞 + 最新优先（并发修改只落一次盘） ---------- */
 let saveChain = Promise.resolve();
@@ -155,33 +171,68 @@ export function useCollection() {
   const [savedAt, setSavedAt] = useState("");
   const dataRef = useRef(data);
   const saveTimer = useRef(null);
+  const baseSavedAtRef = useRef(""); // 乐观锁：客户端持有的云端版本（savedAt），冲突时服务端拒绝
+  const dirtyRef = useRef(false); // 有未落库的本地改动
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const applyAuth = useCallback((id, token) => {
+    sessionRef.current = token; // 同步更新：登录/注册后立即入队的保存必须拿到新会话
     setUid(id);
     setSession(token);
     localStorage.setItem(UID_KEY, id);
     localStorage.setItem(SESSION_KEY, token);
   }, []);
   const clearAuth = useCallback(() => {
+    sessionRef.current = ""; // 同步失效：防止在途请求继续携带过期会话
     setUid("");
     setSession("");
     localStorage.removeItem(UID_KEY);
     localStorage.removeItem(SESSION_KEY);
   }, []);
 
-  /* 落库（队列消费端） */
+  /* 落库（队列消费端）：携带版本号乐观锁；401 会话过期自动登出；409 冲突让位于云端 */
   const persistNow = useCallback(async (snapshot) => {
     setSaveState("saving");
-    const r = await apiPutData(sessionRef.current, snapshot);
+    const r = await apiPutData(sessionRef.current, snapshot, baseSavedAtRef.current);
     if (r.status === 200) {
-      setSavedAt((r.json && r.json.savedAt) || "");
+      baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+      dirtyRef.current = false;
+      setSavedAt(baseSavedAtRef.current);
       setSaveState("saved");
-    } else {
-      setSaveState("error");
-      setError(r.status === 401 ? "登录已过期，请退出后重新登录" : r.status === 0 ? "网络异常，保存未完成" : `保存失败 (HTTP ${r.status})`);
+      return;
     }
-  }, []);
+    if (r.status === 401) {
+      // 会话过期：本地未同步的改动无法上云，回到登录门（下次登录以云端为准）
+      clearAuth();
+      localStorage.removeItem(CACHE_KEY);
+      setUid("");
+      setSession("");
+      setData(null);
+      setStatus("idle");
+      setSaveState("saved");
+      setSavedAt("");
+      setError("");
+      return;
+    }
+    if (r.status === 409) {
+      // 其他设备已先保存：载入云端最新版，本地未同步的改动让位
+      baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+      const latest = await apiGetData(sessionRef.current);
+      if (latest.status === 200 && latest.json && latest.json.data) {
+        const d = ensureShape(latest.json.data);
+        dataRef.current = d;
+        setData(d);
+        writeCache(d);
+        baseSavedAtRef.current = latest.json.savedAt || "";
+        dirtyRef.current = false;
+      }
+      setSaveState("error");
+      setError("检测到其他设备的修改，已载入云端最新版本");
+      return;
+    }
+    setSaveState("error");
+    setError(r.status === 0 ? "网络异常，保存未完成" : `保存失败 (HTTP ${r.status})`);
+  }, [clearAuth]);
   useEffect(() => {
     persistFn = persistNow;
     return () => { persistFn = null; };
@@ -197,9 +248,11 @@ export function useCollection() {
       if (r.status === 200) {
         const d = r.json && r.json.data;
         if (d) {
-          setData(d);
-          writeCache(d);
-          setSavedAt((r.json && r.json.savedAt) || "");
+          const shaped = ensureShape(d);
+          setData(shaped);
+          writeCache(shaped);
+          baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+          setSavedAt(baseSavedAtRef.current);
           setStatus("ready");
         } else {
           const fresh = defaultData();
@@ -242,6 +295,7 @@ export function useCollection() {
   /** 所有修改经此入口：变更 → 防抖自动保存 */
   const mutate = useCallback((fn) => {
     if (!sessionRef.current) return;
+    dirtyRef.current = true;
     setData((prev) => {
       const next = fn(prev);
       dataRef.current = next;
@@ -250,6 +304,37 @@ export function useCollection() {
     });
     scheduleSave();
   }, [scheduleSave]);
+
+  /* 关页/切走前的兑底落库：防抖窗口内关闭标签页不再丢改动（keepalive 尽力而为） */
+  useEffect(() => {
+    const flushOnHide = () => {
+      if (!dirtyRef.current || !sessionRef.current || !dataRef.current) return;
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      dirtyRef.current = false;
+      try {
+        fetch(CLOUD_SYNC.url + "/api/data", {
+          method: "PUT",
+          keepalive: true,
+          headers: {
+            Authorization: `Bearer ${sessionRef.current}`,
+            "Content-Type": "application/json",
+            "X-Base-SavedAt": baseSavedAtRef.current,
+          },
+          body: JSON.stringify(dataRef.current),
+        }).catch(() => { /* 卸载期尽力而为 */ });
+      } catch { /* 卸载期尽力而为 */ }
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") flushOnHide(); };
+    window.addEventListener("pagehide", flushOnHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", flushOnHide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
 
   /* 登录：挑战应答式 */
   const login = useCallback(async (id, password) => {
@@ -265,13 +350,16 @@ export function useCollection() {
     applyAuth(id, r.json.session);
     const d = r.json.data;
     if (d) {
-      setData(d);
-      writeCache(d);
-      setSavedAt(r.json.savedAt || "");
+      const shaped = ensureShape(d);
+      setData(shaped);
+      writeCache(shaped);
+      baseSavedAtRef.current = r.json.savedAt || "";
+      setSavedAt(baseSavedAtRef.current);
     } else {
       const fresh = defaultData();
       setData(fresh);
       writeCache(fresh);
+      baseSavedAtRef.current = "";
       enqueueSave(fresh);
     }
     setError("");
@@ -292,6 +380,8 @@ export function useCollection() {
     const fresh = defaultData();
     setData(fresh);
     writeCache(fresh);
+    baseSavedAtRef.current = "";
+    dirtyRef.current = true;
     setError("");
     setStatus("ready");
     enqueueSave(fresh);
@@ -305,12 +395,16 @@ export function useCollection() {
     setError("");
     const r = await apiGetData(sessionRef.current);
     if (r.status === 200 && r.json && r.json.data) {
-      setData(r.json.data);
-      writeCache(r.json.data);
-      setSavedAt(r.json.savedAt || "");
+      const shaped = ensureShape(r.json.data);
+      setData(shaped);
+      writeCache(shaped);
+      baseSavedAtRef.current = r.json.savedAt || "";
+      setSavedAt(baseSavedAtRef.current);
+      dirtyRef.current = false;
       setStatus("ready");
     } else if (r.status === 401) {
       clearAuth();
+      localStorage.removeItem(CACHE_KEY);
       setData(null);
       setStatus("idle");
     } else {
@@ -322,6 +416,9 @@ export function useCollection() {
   const logout = useCallback(() => {
     clearAuth();
     localStorage.removeItem(CACHE_KEY);
+    try { sessionStorage.removeItem("gatePrefillUid"); } catch { /* 无痕模式等 */ }
+    baseSavedAtRef.current = "";
+    dirtyRef.current = false;
     setUid("");
     setSession("");
     setData(null);
@@ -343,6 +440,8 @@ export function useCollection() {
   const addQuickSite = useCallback((site) => mutate((d) => ({ ...d, quickSites: [{ id: genId("qs"), favicon: "", ...site }, ...d.quickSites] })), [mutate]);
   const updateQuickSite = useCallback((id, patch) => mutate((d) => ({ ...d, quickSites: d.quickSites.map((s) => (s.id === id ? { ...s, ...patch } : s)) })), [mutate]);
   const removeQuickSite = useCallback((id) => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) })), [mutate]);
+  const addIframe = useCallback((widget) => mutate((d) => ({ ...d, iframeWidgets: [...(d.iframeWidgets || []), { id: genId("iw"), ...widget }] })), [mutate]);
+  const removeIframe = useCallback((id) => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).filter((w) => w.id !== id) })), [mutate]);
   const setLayout = useCallback((layout) => mutate((d) => ({ ...d, layout })), [mutate]);
   const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } })), [mutate]);
 
@@ -351,6 +450,7 @@ export function useCollection() {
     login, register, reload, saveNow, logout,
     addItem, addFolder, renameNode, updateNode, removeNode,
     addQuickSite, updateQuickSite, removeQuickSite,
+    addIframe, removeIframe,
     setLayout, setSettings,
   };
 }

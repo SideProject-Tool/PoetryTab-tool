@@ -53,14 +53,27 @@ check("错误密码 401", r.status === 401);
 r = await post("/api/login", { uid, challenge: c2.json.challenge, proof: await hmac(authKey, c2.json.challenge + "x") });
 check("篡改挑战 400", r.status === 400 || r.status === 401);
 
-// 6. 会话写数据
-r = await fetch(BASE + "/api/data", { method: "PUT", headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" }, body: JSON.stringify({ folders: [{ id: "f1", title: "T", children: [] }], quickSites: [], iframeWidgets: [], settings: {}, layout: [] }) });
+// 6. 会话写数据（首次：云端无数据，无需 base）
+const putData = (savedAtBase) => fetch(BASE + "/api/data", {
+  method: "PUT",
+  headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json", "X-Base-SavedAt": savedAtBase || "" },
+  body: JSON.stringify({ folders: [{ id: "f1", title: "T", children: [] }], quickSites: [], iframeWidgets: [], settings: {}, layout: [] }),
+});
+r = await putData("");
 check("会话写数据", r.status === 200, JSON.stringify(await r.json()));
 
 // 7. 会话读数据
 r = await fetch(BASE + "/api/data", { headers: { Authorization: `Bearer ${session2}` } });
 const dj = await r.json();
 check("会话读数据", r.status === 200 && dj.data.folders[0].title === "T");
+
+// 7b. 乐观锁：过期 base 被拒 409，正确 base 可写
+r = await putData("2020-01-01T00:00:00.000Z");
+const conflictBody = r.status === 409 ? await r.json() : null;
+check("过期 base 409", r.status === 409 && !!(conflictBody && conflictBody.savedAt), "");
+const cur = await (await fetch(BASE + "/api/data", { headers: { Authorization: `Bearer ${session}` } })).json();
+r = await putData(cur.savedAt);
+check("正确 base 保存", r.status === 200);
 
 // 8. 无会话/伪造会话被拒
 r = await fetch(BASE + "/api/data");
