@@ -81,6 +81,36 @@ export function removeItem(data, itemId) {
   return { ...data, folders: cut(data.folders) };
 }
 
+/** 在同级列表（书签/子文件夹所在的分组，或常用网站）中上移/下移；dir: -1 上移，1 下移；不可移动时返回原引用 */
+export function moveItem(data, itemId, dir) {
+  const shift = (list) => {
+    const idx = list.findIndex((c) => c.id === itemId);
+    if (idx < 0) return null;
+    const to = idx + dir;
+    if (to < 0 || to >= list.length) return null;
+    const next = [...list];
+    next.splice(to, 0, next.splice(idx, 1)[0]);
+    return next;
+  };
+  if (Array.isArray(data.quickSites)) {
+    const q = shift(data.quickSites);
+    if (q) return { ...data, quickSites: q };
+  }
+  const walk = (children) => {
+    const moved = shift(children);
+    if (moved) return moved;
+    for (const c of children) {
+      if (c.children) {
+        const sub = walk(c.children);
+        if (sub) return children.map((x) => (x.id === c.id ? { ...x, children: sub } : x));
+      }
+    }
+    return null;
+  };
+  const folders = walk(data.folders || []);
+  return folders ? { ...data, folders } : data;
+}
+
 /** 展平为搜索用列表：[{item, path}] */
 export function flattenForSearch(folders) {
   const out = [];

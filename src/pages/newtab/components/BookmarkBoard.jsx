@@ -12,6 +12,8 @@ import {
   IoCreateOutline as EditIcon,
   IoEllipsisHorizontalOutline as MoreIcon,
   IoCheckmarkOutline as CheckIcon,
+  IoArrowUpOutline as UpIcon,
+  IoArrowDownOutline as DownIcon,
   IoGridOutline as GridIcon,
   IoBookOutline as PoemIcon,
   IoCloudOutline as CloudSyncIcon,
@@ -307,7 +309,7 @@ function ManageSheet({ col, target, onClose }) {
         </div>
 
         <div className="bm-list">
-          {items.map((item) =>
+          {items.map((item, idx) =>
             editId === item.id ? (
               <div key={item.id} className="bm-row bm-row-edit">
                 <input className="bm-input" value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="标题" />
@@ -339,29 +341,49 @@ function ManageSheet({ col, target, onClose }) {
                     {item.title || item.url}
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="bm-op"
-                  title="编辑"
-                  onClick={() => {
-                    setEditId(item.id);
-                    setETitle(item.title || "");
-                    setEUrl(item.url || "");
-                  }}
-                >
-                  <EditIcon />
-                </button>
-                <button
-                  type="button"
-                  className="bm-op bm-op-danger"
-                  title={item.children ? "删除文件夹（含内容）" : "删除"}
-                  onClick={() => {
-                    if (isQs) col.removeQuickSite(item.id);
-                    else col.removeNode(item.id);
-                  }}
-                >
-                  <TrashIcon />
-                </button>
+                <div className="bm-ops">
+                  <button
+                    type="button"
+                    className="bm-op"
+                    title="上移"
+                    disabled={idx === 0}
+                    onClick={() => col.moveNode(item.id, -1)}
+                  >
+                    <UpIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="bm-op"
+                    title="下移"
+                    disabled={idx === items.length - 1}
+                    onClick={() => col.moveNode(item.id, 1)}
+                  >
+                    <DownIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="bm-op"
+                    title="编辑"
+                    onClick={() => {
+                      setEditId(item.id);
+                      setETitle(item.title || "");
+                      setEUrl(item.url || "");
+                    }}
+                  >
+                    <EditIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="bm-op bm-op-danger"
+                    title={item.children ? "删除文件夹（含内容）" : "删除"}
+                    onClick={() => {
+                      if (isQs) col.removeQuickSite(item.id);
+                      else col.removeNode(item.id);
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               </div>
             )
           )}

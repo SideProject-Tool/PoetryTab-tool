@@ -4,6 +4,7 @@ import {
   addChildToFolder,
   updateItem,
   removeItem,
+  moveItem,
   genId,
   SETTINGS_DEFAULTS,
 } from "../services/collection";
@@ -437,6 +438,7 @@ export function useCollection() {
   const renameNode = useCallback((id, title) => mutate((d) => updateItem(d, id, { title })), [mutate]);
   const updateNode = useCallback((id, patch) => mutate((d) => updateItem(d, id, patch)), [mutate]);
   const removeNode = useCallback((id) => mutate((d) => removeItem(d, id)), [mutate]);
+  const moveNode = useCallback((id, dir) => mutate((d) => moveItem(d, id, dir)), [mutate]);
   const addQuickSite = useCallback((site) => mutate((d) => ({ ...d, quickSites: [{ id: genId("qs"), favicon: "", ...site }, ...d.quickSites] })), [mutate]);
   const updateQuickSite = useCallback((id, patch) => mutate((d) => ({ ...d, quickSites: d.quickSites.map((s) => (s.id === id ? { ...s, ...patch } : s)) })), [mutate]);
   const removeQuickSite = useCallback((id) => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) })), [mutate]);
@@ -448,7 +450,7 @@ export function useCollection() {
   return {
     uid, hasUid, data, status, error, saveState, savedAt,
     login, register, reload, saveNow, logout,
-    addItem, addFolder, renameNode, updateNode, removeNode,
+    addItem, addFolder, renameNode, updateNode, removeNode, moveNode,
     addQuickSite, updateQuickSite, removeQuickSite,
     addIframe, removeIframe,
     setLayout, setSettings,

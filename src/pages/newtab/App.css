@@ -1013,6 +1013,9 @@
   cursor: pointer;
 }
 .bm-op:hover { opacity: 1; background: rgba(128, 128, 128, 0.12); }
+.bm-op:disabled { opacity: 0.15; cursor: not-allowed; }
+.bm-op:disabled:hover { background: transparent; }
+.bm-ops { display: flex; align-items: center; gap: 0.1rem; margin-left: auto; flex-shrink: 0; }
 .bm-op-danger:hover { color: var(--color-error); }
 .bm-op svg { width: 0.95rem; height: 0.95rem; }
 .bm-folder-ops { padding: 0.2rem 0.5rem 0.1rem; }
