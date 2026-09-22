@@ -12,7 +12,8 @@
     "zip:firefox": "wxt zip -b firefox",
     "zip:all": "wxt zip && wxt zip -b firefox && wxt zip -b edge",
     "split": "node subset-zhuokai.mjs",
-    "build:web": "vite build --config vite.web.config.mjs"
+    "build:web": "vite build --config vite.web.config.mjs",
+    "ext:sync": "bash scripts/sync-ext.sh"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
