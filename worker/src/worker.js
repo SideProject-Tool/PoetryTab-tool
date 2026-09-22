@@ -223,9 +223,11 @@ export default {
       return handleApi(request, env, url);
     }
 
-    // 网页版：按路径取静态文件；未命中回退 index.html
+    // 网页版：按路径取静态文件；仅对无扩展名的路径回退 index.html（SPA 路由），
+    // 带扩展名的缺失文件（如 .html/.js）必须返回真实 404，避免错误内容伪装成页面
     const asset = await env.ASSETS.fetch(new Request("https://assets.local" + url.pathname, request));
-    let res = asset.status === 404 ? await env.ASSETS.fetch("https://assets.local/index.html") : asset;
+    const isSpaRoute = asset.status === 404 && !url.pathname.includes(".");
+    let res = isSpaRoute ? await env.ASSETS.fetch("https://assets.local/index.html") : asset;
     if ((res.headers.get("Content-Type") || "").includes("text/html")) {
       res = new Response(res.body, { status: res.status, headers: res.headers });
       res.headers.set("Cache-Control", "no-store");

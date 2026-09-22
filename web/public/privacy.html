@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poetry-Tab 隐私权政策</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 760px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; line-height: 1.8; color: #2d2a26; background: #faf7f2; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+    h2 { font-size: 1.15rem; margin-top: 2.2rem; border-left: 4px solid #40c4aa; padding-left: 0.6rem; }
+    .meta { color: #8a857d; font-size: 0.9rem; }
+    .en { color: #6f6a63; }
+    a { color: #178f7a; }
+    ul { padding-left: 1.4rem; }
+    .card { background: #fff; border: 1px solid #eee5d8; border-radius: 12px; padding: 1.25rem 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Poetry-Tab 隐私权政策</h1>
+  <p class="meta">生效日期：2026-09-21 ｜ 适用于 Poetry-Tab 浏览器扩展及网页版（sync.pathmemos.com）</p>
+
+  <h2>一句话总结</h2>
+  <div class="card">
+    <b>我们不出售你的数据，不投放广告，不做行为追踪。</b>你的账号只有一个自设 ID 和密码；你的收藏数据只存在你自己的账号空间里。
+    <br /><span class="en">We do not sell your data, show ads, or track you. Your data lives only in your own account space.</span>
+  </div>
+
+  <h2>1. 我们收集哪些信息</h2>
+  <ul>
+    <li><b>账号凭据</b>：你自设的用户 ID（任意昵称），以及密码的<b>派生验证值</b>。密码本身经过 PBKDF2（600,000 次迭代 + 每账号独立随机盐）在本地派生后提交，<b>明文密码不会离开你的设备，服务器也无法还原</b>。</li>
+    <li><b>收藏数据</b>：你主动保存的书签、分组、常用网站、小组件与偏好设置（主题、搜索引擎、诗词分类）。</li>
+    <li><b>时间戳</b>：每次保存的时间，用于多设备版本比对与历史快照。</li>
+  </ul>
+  <p>我们不收集：真实姓名、邮箱、手机号、支付信息、浏览历史（Poetry-Tab 不会读取你在其他网站的浏览记录）、精确位置，也不使用任何第三方分析或统计 SDK。</p>
+
+  <h2>2. 信息如何存储与保护</h2>
+  <ul>
+    <li>数据通过 HTTPS 加密传输，存储于 Cloudflare R2 对象存储（区域自动调度）。</li>
+    <li>服务器仅保存密码的 PBKDF2 派生值；登录采用服务器签发的一次性挑战应答（HMAC），会话令牌有效期 30 天且可随时通过退出登录作废。</li>
+    <li>数据写入采用版本比对（乐观锁），保留最近 5 份历史快照用于误删恢复。</li>
+  </ul>
+
+  <h2>3. 信息的使用</h2>
+  <p>收集的信息<b>仅用于</b>：验证你的登录、在你自有的账号空间内同步与恢复收藏数据、生成历史快照。除此之外无任何其他用途。</p>
+
+  <h2>4. 信息的共享与出售</h2>
+  <p>我们不向任何第三方出售、出租或共享你的个人信息；不将数据用于与核心功能无关的用途；不因与本服务无关的法律要求之外的目的转移数据。基础设施服务商（Cloudflare, Inc.）仅作为数据存储处理方。</p>
+
+  <h2>5. 数据保留与删除</h2>
+  <p>你的数据在你的账号存在期间保留。你可以在扩展或网页版的设置面板中随时<b>退出登录</b>清除本机数据；如需彻底删除云端账号及全部数据，请发送邮件至 <a href="mailto:chenproton@gmail.com">chenproton@gmail.com</a>，我们将在 7 个工作日内删除。</p>
+
+  <h2>6. 未成年人</h2>
+  <p>本产品面向一般用户，不刻意收集任何 13 岁以下未成年人的个人信息。</p>
+
+  <h2>7. 政策变更</h2>
+  <p>如政策发生实质性变更，我们将在本页面更新并修改生效日期。</p>
+
+  <h2>8. 联系我们</h2>
+  <p>邮箱：<a href="mailto:chenproton@gmail.com">chenproton@gmail.com</a> ｜ 项目开源：<a href="https://github.com/startnewlabs/SP-poetrytab" rel="noopener">github.com/startnewlabs/SP-poetrytab</a></p>
+
+  <h2>Privacy Policy (English Summary)</h2>
+  <p class="en">Poetry-Tab collects only a self-chosen user ID, a PBKDF2-derived (irreversible) verification value of your password, and the bookmarks/settings you explicitly save. Data is transmitted over HTTPS, stored in Cloudflare R2 within your own account space, and never sold, shared with third parties, or used for unrelated purposes. No analytics, ads, or browsing-history tracking. Delete anytime via logout (local) or email chenproton@gmail.com (cloud account, processed within 7 business days).</p>
+</body>
+</html>
