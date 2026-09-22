@@ -9,7 +9,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| `poetry-tab-chrome.zip`（Downloads 目录，3.0MB） | Chrome Web Store 与 Edge Add-ons 共用的上传包（MV3，manifest v1.0.0） |
+| `poetrytab-tool-chrome.zip`（Downloads 目录，3.0MB） | Chrome Web Store 与 Edge Add-ons 共用的上传包（MV3，manifest v1.0.0） |
 | `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（至少 1 张，1280×800） |
 | `store/screenshot-edge-1080x680.png` | Edge 商店截图（至少 1 张，1080×680） |
 | `store/logo-edge-300x300.png` | Edge 商店 Logo（300×300） |
@@ -26,7 +26,7 @@
 - 建议同时完成「账号验证」（邮箱 + 电话），可增加可发布项数量上限
 
 ### 2. 上传与填写
-1. 开发者中心 →「新增项」→ 上传 `poetry-tab-chrome.zip`
+1. 开发者中心 →「新增项」→ 上传 `poetrytab-tool-chrome.zip`
 2. 「商店呈现」页填写（可直接复制下方文案）：
    - **名称**：`Poetry-Tab`（自动读自 manifest）
    - **简短说明**（≤132 字符）：见下方「简短说明」
@@ -81,7 +81,7 @@ Poetry-Tab 把古诗词和你的收藏，装进每一个新标签页。
 
 ### 2. 上传与填写
 1. Partner Center → Edge 计划 →「创建新扩展」
-2. 上传同一个 `poetry-tab-chrome.zip`（Edge 兼容 Chrome MV3 包，无需改代码）
+2. 上传同一个 `poetrytab-tool-chrome.zip`（Edge 兼容 Chrome MV3 包，无需改代码）
 3. 填写（复制下方内容）：
    - **显示名称**：`Poetry-Tab`
    - **简短说明** / **描述**：同 Chrome 文案

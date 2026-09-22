@@ -1,5 +1,5 @@
 {
-  "name": "poetry-tab",
+  "name": "poetrytab-tool",
   "description": "Poetry-Tab - 新标签页：古诗词 · 收藏看板 · 云同步（Chrome 扩展 + 网页版）",
   "version": "1.0.0",
   "scripts": {
@@ -46,10 +46,10 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/startnewlabs/SP-poetrytab.git"
+    "url": "git+https://github.com/SideProject-Tool/PoetryTab-tool.git"
   },
   "bugs": {
-    "url": "https://github.com/startnewlabs/SP-poetrytab/issues"
+    "url": "https://github.com/SideProject-Tool/PoetryTab-tool/issues"
   },
   "homepage": "https://sync.pathmemos.com"
 }
