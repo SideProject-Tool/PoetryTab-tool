@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
  * Enter 打开选中项，↑↓ 切换，Esc 清空；Ctrl+点击 新标签打开
  */
 import { openUrl } from "../../../platform";
+import { safeUrl } from "../services/collection";
 
 const PALETTE = ["#c96f5e", "#7b9e56", "#5e89c9", "#b0785e", "#8a6fc9", "#c95e8a", "#5eb0a5", "#c9a35e"];
 function paletteColor(str) {
@@ -41,8 +42,9 @@ export default function BookmarkSearch({ items = [] }) {
   }, [activeIndex]);
 
   const openItem = (item, newTab) => {
-    if (!item?.url) return;
-    openUrl(item.url, { newTab });
+    const url = safeUrl(item.url); // 渲染/打开前复核：失效或不安全协议直接忽略
+    if (!url) return;
+    openUrl(url, { newTab });
   };
 
   const handleKeyDown = (e) => {

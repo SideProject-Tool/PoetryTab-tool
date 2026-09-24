@@ -78,15 +78,25 @@ function TileIcon({ item }) {
 }
 
 function BookmarkTile({ item }) {
+  const url = safeUrl(item.url);
+  if (!url) {
+    // 云端数据中的失效/不安全 URL：降级为不可点占位，不让异常协议进入 href
+    return (
+      <span className="bt" style={{ opacity: 0.55, cursor: "default" }} title={item.title || ""}>
+        <TileIcon item={item} />
+        <span className="bt-label">{item.title || item.url || "无效链接"}</span>
+      </span>
+    );
+  }
   return (
     <a
-      href={item.url}
+      href={url}
       className="bt"
       title={item.title}
       onClick={(e) => {
         if (e.ctrlKey || e.metaKey || e.button === 1) return;
         e.preventDefault();
-        openUrl(item.url);
+        openUrl(url);
       }}
     >
       <TileIcon item={item} />
@@ -207,7 +217,7 @@ function IframeWidget({ widget, onRemove, dragHandle }) {
             type="button"
             className="board-widget-action"
             title="在新标签页打开"
-            onClick={() => openUrl(widget.url)}
+            onClick={() => { const u = safeUrl(widget.url); if (u) openUrl(u); }}
           >
             <OpenIcon className="w-4 h-4" />
           </button>
@@ -217,7 +227,14 @@ function IframeWidget({ widget, onRemove, dragHandle }) {
         </div>
       </div>
       <div className="board-iframe-body">
-        <iframe key={reloadKey} src={widget.url} className="board-iframe" title={widget.title} referrerPolicy="no-referrer" />
+        <iframe
+          key={reloadKey}
+          src={safeUrl(widget.url) || "about:blank"}
+          className="board-iframe"
+          title={widget.title}
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
       </div>
       <div className="board-iframe-hint">若页面空白，说明该网站禁止内嵌，点右上角 ↗ 新窗口打开</div>
     </div>
@@ -337,7 +354,12 @@ function ManageSheet({ col, target, onClose }) {
                 {item.children ? (
                   <span className="bm-row-folder">🗂 {item.title || "未命名"}</span>
                 ) : (
-                  <button type="button" className="bm-row-open" title="打开" onClick={() => openUrl(item.url)}>
+                  <button
+                    type="button"
+                    className="bm-row-open"
+                    title="打开"
+                    onClick={() => { const u = safeUrl(item.url); if (u) openUrl(u); }}
+                  >
                     {item.title || item.url}
                   </button>
                 )}
@@ -499,18 +521,22 @@ function DraggableCell({ def, style, children }) {
  */
 
 function packColumns(items, cols, obstacles = []) {
+  // 本函数在「行」空间装箱（1 行 = LEGACY_ROW_PX 像素）。
+  // 障碍卡片的 y 与高度均为像素（高度含实测 heights），须先换算为行：
+  // 否则像素被当行用，新卡会叠到现有卡上、或被放到数万像素之外。
   const colBottom = new Array(cols).fill(0);
   for (const o of obstacles) {
     const ospan = Math.max(1, Math.min(cols, o.w));
-    const orows = o.h > 0 ? o.h : 2;
-    for (let x = o.x; x < Math.min(o.x + ospan, cols); x++) {
-      colBottom[x] = Math.max(colBottom[x], o.y + orows);
+    const ox = Math.max(0, Math.min(cols - ospan, o.x || 0));
+    const obottom = Math.max(2, Math.ceil(((o.y || 0) + Math.max(o.hPx || 0, o.h || 0)) / LEGACY_ROW_PX));
+    for (let x = ox; x < ox + ospan; x++) {
+      colBottom[x] = Math.max(colBottom[x], obottom);
     }
   }
   const placed = [];
   for (const it of items) {
     const span = Math.max(1, Math.min(cols, it.w));
-    const rows = it.h > 0 ? it.h : 2;
+    const rows = Math.max(2, Math.ceil((it.hPx || it.h || 0) / LEGACY_ROW_PX)); // 高度未知至少按 2 行估
     let bestX = 0;
     let bestY = Infinity;
     for (let x = 0; x <= cols - span; x++) {
@@ -662,13 +688,13 @@ export default function BookmarkBoard({ col }) {
     for (const wd of widgetDefs) {
       if (!seen.has(wd.id)) needPlace.push({ i: wd.id, w: defaultWidth(wd.id), h: wd.id.startsWith("w:") ? 480 : 0 });
     }
-    // 新卡片 / 旧格式数据：自动装箱补位
+    // 新卡片 / 旧格式数据：自动装箱补位（障碍高度用实测内容高度，避免叠卡/飞出屏幕）
     if (needPlace.length) {
-      // packColumns 的 y 以行计，这里换算为像素（行高 90px）
-      for (const p of packColumns(needPlace, REF_COLS, known)) known.push({ ...p, y: Math.round(p.y * 90) });
+      const obstacles = known.map((k) => ({ ...k, hPx: Math.max(effHeightPx(k, heights), k.h || 0) }));
+      for (const p of packColumns(needPlace, REF_COLS, obstacles)) known.push({ ...p, y: Math.round(p.y * LEGACY_ROW_PX) });
     }
     return known;
-  }, [data?.layout, widgetDefs]);
+  }, [data?.layout, widgetDefs, heights]);
 
   /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
   const [items, setItems] = useState(derivedLayout);
@@ -984,7 +1010,7 @@ export default function BookmarkBoard({ col }) {
           詩
         </div>
         <div className="gate-card">
-          <img src="icon/128.png" alt="Poetry-Tab" className="gate-logo" />
+          <img src={`${import.meta.env.BASE_URL}icon/128.png`} alt="Poetry-Tab" className="gate-logo" />
           <h1 className="gate-title">Poetry-Tab</h1>
           <p className="gate-tagline">把古诗词和你的收藏，装进每一个新标签页</p>
           <div className="gate-features">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Component } from "react";
 import "./App.css";
 import BookmarkSearch from "./components/BookmarkSearch";
 import BookmarkBoard from "./components/BookmarkBoard";
@@ -12,6 +12,43 @@ import { IoSearchOutline as SearchIcon, IoCloseOutline as CloseIcon } from "reac
 
 
 const THEME_NAMES = { light: "cupcake", dark: "halloween" };
+
+/* 渲染异常兜底：数据损坏时给出可操作的恢复入口，避免整页白屏（每次开新标签页都复现） */
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err) {
+    console.error("Poetry-Tab 渲染异常", err);
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="gate-screen">
+          <div className="gate-card" style={{ textAlign: "center" }}>
+            <h1 className="gate-title">数据异常</h1>
+            <p className="gate-tagline">数据异常，可尝试从云端恢复或重置</p>
+            <button
+              type="button"
+              className="gate-btn primary"
+              onClick={() => {
+                try { localStorage.clear(); } catch { /* 无痕模式等 */ }
+                location.reload();
+              }}
+            >
+              重置本地数据
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const col = useCollection();
@@ -98,7 +135,8 @@ export default function App() {
   }, [col.data]);
 
   return (
-    <div id="app" className="custom-font" style={{ "--custom-font-name": FONTNAME_LIST[0] }}>
+    <ErrorBoundary>
+      <div id="app" className="custom-font" style={{ "--custom-font-name": FONTNAME_LIST[0] }}>
       {/* 诗词（点击换一首） */}
       <div className="pc-poem-wrap" onClick={rotatePoem} title="点一下换一首">
         <div id="pc-poem" className={poemFading ? "fading" : ""}>
@@ -146,6 +184,17 @@ export default function App() {
 
       {/* 设置面板（右上角 ⚙，与搜索按钮并排） */}
       <SettingsPanel col={col} />
-    </div>
+
+      {/* 保存状态徽标：失败/冲突时轻提示（conflict 需在设置面板手动选择上传/恢复） */}
+      {(col.saveState === "error" || col.saveState === "conflict") && (
+        <div
+          className={`sync-badge${col.saveState === "conflict" ? " conflict" : ""}`}
+          title={col.error || ""}
+        >
+          {col.saveState === "conflict" ? "云端有更新 · 本地未同步" : "未同步 · 自动重试中"}
+        </div>
+      )}
+      </div>
+    </ErrorBoundary>
   );
 }

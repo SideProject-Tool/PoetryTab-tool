@@ -62,7 +62,7 @@
 | 主题 | 浅色 / 深色 / 跟随系统（入口：右上角 ⚙） |
 | 搜索引擎 | 百度 / Google / Bing / DuckDuckGo |
 | 展示类别 | 12 个诗词分类任意组合（至少一个） |
-| 云同步 | 用户 ID、上传到云端、从云端恢复 |
+| 云同步 | 用户 ID + 密码登录、上传到云端、从云端恢复 |
 
 ---
 
@@ -84,11 +84,11 @@
 ## 📖 使用指南
 
 ### 首次使用
-打开新标签页会看到「云端收藏夹」输入框：
-- **新建用户**：输入一个你记得住的 ID（如 `my-poetry`），回车即创建专属收藏夹
-- **打开**：在别的设备上已用过？输入同一个 ID 即可接续
+打开新标签页会看到登录门：
+- **新建用户**：输入一个你记得住的 ID（如 `my-poetry`）和密码（至少 6 位），点「新建用户」即创建账号
+- **登录**：在别的设备上已用过？同一 ID + 密码登录即可接续
 
-> ID 即身份，无密码。请自行保管好 ID，知道 ID 的人都能访问你的收藏。
+> ID + 密码即账号，无需邮箱注册。密码只在本地经 PBKDF2 派生后以挑战应答方式登录，明文永不上传、服务端只存派生结果。
 
 ### 看板操作
 | 操作 | 方式 |
@@ -130,12 +130,27 @@
 
 ## ☁️ 云端数据契约
 
-存储路径：R2 桶 `proton-collect-sync` 下的 `collections/<uid>.json`，保留最近 5 个版本快照。
-所有请求经 `Authorization: Bearer <token>` 认证（token 由 Worker 注入页面，扩展内置同一 token）。
+存储（R2 桶，Worker 绑定名 `BUCKET`）：
+- `pt/accounts/<uid>.json` —— 账号记录 `{v, iter, salt, authKey, createdAt}`
+- `pt/data/<uid>.json` —— 最新数据 `{savedAt, data}`
+- `pt/data/<uid>/snap-<ts>-<seq>.json` —— 历史快照（保留最近 5 份）
+
+**账号与会话**（密码永不明文传输/存储）：
+- 注册：客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k 迭代) 得 authKey 提交，服务端只存派生结果
+- 登录：`POST /api/challenge` 领取带签名的一次性挑战（附盐与迭代次数）→ 客户端重派生 authKey，以 HMAC-SHA256(authKey, challenge) 应答
+- 会话：登录成功发放无状态令牌 `uid|exp|HMAC(SYNC_TOKEN, uid|exp)`，30 天有效；此后数据读写仅凭令牌（`Authorization: Bearer`），uid 从令牌解析，杜绝越权
+
+**API**（`/api/register`、`/api/challenge`、`/api/login` 无需令牌但有 per-IP 限流；其余需会话令牌）：
+- `POST /api/register` `{uid, salt, authKey, iter}` → `{session}`
+- `POST /api/challenge` `{uid}` → `{challenge, salt, iter}`
+- `POST /api/login` `{uid, challenge, proof}` → `{session, savedAt, data}`
+- `GET /api/data` → `{savedAt, data}`
+- `PUT /api/data` 整体写入（≤8MB），携带 `X-Base-SavedAt` 乐观锁：与云端当前 `savedAt` 不一致返回 409；成功后自动轮转快照
+
+**数据格式**（`pt/data/<uid>.json` 的 `data` 字段）：
 
 ```jsonc
 {
-  "v": 2,
   "folders": [                      // 分组（顶层卡片）
     {
       "id": "f_xxx",
@@ -149,26 +164,24 @@
     { "id": "qs_xxx", "title": "GitHub", "url": "https://github.com", "favicon": "" }
   ],
   "iframeWidgets": [                // iframe 内嵌小部件卡片
-    { "id": "iw_xxx", "title": "example", "url": "https://example.com", "width": 560 }
+    { "id": "iw_xxx", "title": "example", "url": "https://example.com" }
   ],
   "settings": {                     // 同步的设置
     "theme": "sync",                // sync | light | dark
     "engine": "baidu",              // baidu | google | bing | duckduckgo
     "cats": ["i"]                   // 启用的诗词分类
   },
-  "layout": [                       // 看板布局：数组顺序即显示顺序
-    { "i": "qs:quicksites", "w": 2, "h": 0 },
-    { "i": "f:f_xxx",       "w": 2, "h": 0 }
+  "layout": [                       // 看板布局：显式坐标
+    { "i": "qs:quicksites", "x": 0, "y": 0, "w": 2, "h": 0 },
+    { "i": "f:f_xxx",       "x": 2, "y": 0, "w": 2, "h": 0 }
     // i  = 卡片标识（qs:常用网站 / f:分组 / w:iframe）
-    // w  = 列跨度（以「参考 10 列」为坐标系存储，渲染时按实际列数 10/6/4/2 等比换算）
-    // h  = 最小行数（单位为固定像素行，0 表示不设下限；内容永远完整展开）
+    // x/w = 列位置/跨度（以「参考 10 列」为坐标系存储，渲染时按实际列数 10/6/4/2 等比换算）
+    // y/h = 像素（y 纵向位置；h 最小高度，0 表示不设下限；内容永远完整展开）
   ]
 }
 ```
 
-**API**：
-- `GET /api/sync/:uid` → 读取收藏（含 `savedAt`）
-- `PUT /api/sync/:uid` → 整体写入（服务端自动轮转历史快照）
+> 已知限制：并发 PUT 的「读版本→比对→写入」在服务端非原子（未用 R2 条件写），极端并发下可能后写覆盖先写；常规多端使用由 `X-Base-SavedAt` 乐观锁 + 客户端冲突提示兜底。
 
 ---
 
@@ -200,7 +213,7 @@ pnpm zip            # 打包扩展 zip
 
 **E2E 测试**（Playwright，位于 `../ext-test/`）：
 - `test-rgl.cjs` — 看板全流程回归（14 步：登录/建分组/收录/小部件/拖动/拉伸/云端布局/双端一致/手机视口）
-- 云端断言直接读取 `GET /api/sync/:uid` 比对
+- 云端断言直接读取 `GET /api/data`（需会话令牌）比对
 
 ---
 
@@ -213,7 +226,7 @@ pnpm build:web
 wrangler deploy        # 详见 worker 目录的 wrangler.toml（路由、R2 绑定、token secret）
 ```
 - 域名 `sync.pathmemos.com` 绑定为 Worker 自定义域
-- `SYNC_TOKEN` 通过 `wrangler secret put` 配置，前端由 Worker 注入页面
+- `SYNC_TOKEN` 为服务端 HMAC 密钥（会话令牌与登录挑战签名），通过 `wrangler secret put` 配置，绝不下发前端
 
 ### 扩展分发
 - `pnpm build` 后加载 `.output/chrome-mv3`，或 `pnpm zip` 出分发包
@@ -224,8 +237,8 @@ wrangler deploy        # 详见 worker 目录的 wrangler.toml（路由、R2 绑
 ## 🔒 隐私
 
 - 收藏数据存在**你自己的** Cloudflare R2 中，不经手任何第三方
-- 无埋点、无追踪、无广告
-- 用户 ID 即访问凭证，请妥善保管
+- 无埋点、无追踪、无广告；密码只在本地 PBKDF2 派生后以挑战应答方式登录，明文永不上传
+- 账号凭 ID + 密码登录，请妥善保管
 
 ## 📄 License
 

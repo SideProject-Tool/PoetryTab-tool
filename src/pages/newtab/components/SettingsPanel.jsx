@@ -93,12 +93,20 @@ export default function SettingsPanel({ col }) {
   const handlePull = useCallback(async () => {
     if (!col.uid) { setMsg("✗ 尚未登录"); return; }
     setMsg("正在从云端拉取…");
-    await col.reload();
-    setMsg(col.status === "error" ? "✗ " + (col.error || "拉取失败") : "✓ 已从云端重新拉取");
+    const r = await col.reload(); // 用返回值判定成败，避免读到过期的 state 快照
+    setMsg(r && r.ok ? "✓ 已从云端重新拉取" : "✗ " + ((r && r.error) || "拉取失败"));
   }, [col]);
 
   const saveLabel =
-    col.saveState === "saving" ? "保存中…" : col.saveState === "error" ? "保存失败，点按重试" : col.savedAt ? `已保存 ${col.savedAt.replace("T", " ").slice(11, 16)}` : "自动同步";
+    col.saveState === "saving"
+      ? "保存中…"
+      : col.saveState === "error"
+        ? "保存失败，点按重试"
+        : col.saveState === "conflict"
+          ? "云端有更新，点按上传以本地为准"
+          : col.savedAt
+            ? `已保存 ${new Date(col.savedAt).toLocaleTimeString()}`
+            : "自动同步";
 
   const themeLabel = THEME_LABELS[settings.theme] || "跟随系统";
   const engineLabel = SEARCH_ENGINES[settings.engine]?.label || "百度";

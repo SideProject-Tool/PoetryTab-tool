@@ -114,7 +114,7 @@ function readCache() {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && Array.isArray(parsed.folders) ? parsed : null;
+    return parsed && Array.isArray(parsed.folders) ? ensureShape(parsed) : null;
   } catch {
     return null;
   }
@@ -131,16 +131,25 @@ function defaultData() {
     layout: [],
   };
 }
-/** 云端数据兜底：数组字段缺失/损坏时补默认值 */
+/** 云端数据兜底：数组字段缺失/损坏时补默认值。
+ *  深度归一：folder 补 children、剔除 null/非对象项、settings.cats 非数组回退默认，避免畸形数据渲染崩溃 */
 function ensureShape(d) {
   if (!d || typeof d !== "object") return defaultData();
+  const normList = (list) =>
+    Array.isArray(list) ? list.filter((x) => x && typeof x === "object") : [];
+  const folders = normList(d.folders).map((f) => ({ ...f, children: normList(f.children) }));
+  const settings = {
+    ...SETTINGS_DEFAULTS,
+    ...(d.settings && typeof d.settings === "object" ? d.settings : {}),
+  };
+  if (!Array.isArray(settings.cats)) settings.cats = [...SETTINGS_DEFAULTS.cats];
   return {
     ...d,
-    folders: Array.isArray(d.folders) ? d.folders : [],
-    quickSites: Array.isArray(d.quickSites) ? d.quickSites : [],
-    iframeWidgets: Array.isArray(d.iframeWidgets) ? d.iframeWidgets : [],
-    layout: Array.isArray(d.layout) ? d.layout : [],
-    settings: { ...SETTINGS_DEFAULTS, ...(d.settings || {}) },
+    folders,
+    quickSites: normList(d.quickSites),
+    iframeWidgets: normList(d.iframeWidgets),
+    layout: normList(d.layout),
+    settings,
   };
 }
 
@@ -168,7 +177,9 @@ export function useCollection() {
   const [data, setData] = useState(() => readCache());
   const [status, setStatus] = useState(() => (session ? "boot" : "idle"));
   const [error, setError] = useState("");
-  const [saveState, setSaveState] = useState("saved"); // saved | saving | error
+  const [saveState, setSaveState] = useState("saved"); // saved | saving | error | conflict
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
   const [savedAt, setSavedAt] = useState("");
   const dataRef = useRef(data);
   const saveTimer = useRef(null);
@@ -197,7 +208,7 @@ export function useCollection() {
     const r = await apiPutData(sessionRef.current, snapshot, baseSavedAtRef.current);
     if (r.status === 200) {
       baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
-      dirtyRef.current = false;
+      if (snapshot === dataRef.current) dirtyRef.current = false; // 快照入队后又有新编辑则保持 dirty
       setSavedAt(baseSavedAtRef.current);
       setSaveState("saved");
       return;
@@ -216,8 +227,14 @@ export function useCollection() {
       return;
     }
     if (r.status === 409) {
-      // 其他设备已先保存：载入云端最新版，本地未同步的改动让位
+      // 其他设备已先保存：本地有未同步修改时保留本地（saveState=conflict，由用户在设置面板
+      // 手动选择「上传到云端」=本地为准 / 「从云端恢复」=云端为准）；无未同步修改才自动载入云端
       baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+      if (dirtyRef.current) {
+        setSaveState("conflict");
+        setError("云端有更新，已保留本地修改");
+        return;
+      }
       const latest = await apiGetData(sessionRef.current);
       if (latest.status === 200 && latest.json && latest.json.data) {
         const d = ensureShape(latest.json.data);
@@ -249,6 +266,13 @@ export function useCollection() {
       if (r.status === 200) {
         const d = r.json && r.json.data;
         if (d) {
+          if (dirtyRef.current) {
+            // 启动窗口内已有本地编辑：不覆盖本地，仅把乐观锁 rebase 到云端当前版本
+            baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+            setSavedAt(baseSavedAtRef.current);
+            setStatus("ready");
+            return;
+          }
           const shaped = ensureShape(d);
           setData(shaped);
           writeCache(shaped);
@@ -293,6 +317,15 @@ export function useCollection() {
     await saveChain;
   }, []);
 
+  /* 保存失败自动重试：每 30s 重发直到成功（conflict 需用户手动抉择，不自动重试） */
+  useEffect(() => {
+    if (saveState !== "error") return;
+    const t = setInterval(() => {
+      if (sessionRef.current && dataRef.current) enqueueSave(dataRef.current);
+    }, 30000);
+    return () => clearInterval(t);
+  }, [saveState]);
+
   /** 所有修改经此入口：变更 → 防抖自动保存 */
   const mutate = useCallback((fn) => {
     if (!sessionRef.current) return;
@@ -310,22 +343,37 @@ export function useCollection() {
   useEffect(() => {
     const flushOnHide = () => {
       if (!dirtyRef.current || !sessionRef.current || !dataRef.current) return;
+      if (saveStateRef.current === "conflict") return; // 冲突待用户抉择，不自动以本地覆盖云端
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
-      dirtyRef.current = false;
       try {
+        const body = JSON.stringify(dataRef.current);
+        // keepalive 请求体字节上限约 64KB：超限退回普通 fetch（尽力而为）
+        const keepalive = new Blob([body]).size <= 60000;
         fetch(CLOUD_SYNC.url + "/api/data", {
           method: "PUT",
-          keepalive: true,
+          keepalive,
           headers: {
             Authorization: `Bearer ${sessionRef.current}`,
             "Content-Type": "application/json",
             "X-Base-SavedAt": baseSavedAtRef.current,
           },
-          body: JSON.stringify(dataRef.current),
-        }).catch(() => { /* 卸载期尽力而为 */ });
+          body,
+        })
+          .then(async (r) => {
+            // 消费响应：同步本地乐观锁版本，否则下次保存会被假 409 回滚
+            if (!r.ok) return;
+            let j = null;
+            try { j = await r.json(); } catch { /* 非 JSON 响应 */ }
+            if (j && j.savedAt) {
+              baseSavedAtRef.current = j.savedAt;
+              setSavedAt(j.savedAt);
+              dirtyRef.current = false; // 仅成功后清 dirty；失败保持 dirty 以便下次 hide 重试
+            }
+          })
+          .catch(() => { /* 卸载期尽力而为 */ });
       } catch { /* 卸载期尽力而为 */ }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flushOnHide(); };
@@ -341,6 +389,7 @@ export function useCollection() {
   const login = useCallback(async (id, password) => {
     const c = await apiPost("/api/challenge", { uid: id });
     if (c.status === 404) return { ok: false, code: "bad-id" };
+    if (c.status === 400) return { ok: false, code: "bad-id" }; // uid 格式非法（服务端白名单校验）
     if (c.status !== 200 || !c.json || !c.json.challenge) return { ok: false, code: "network" };
     const authKey = await deriveAuthKey(password, c.json.salt, c.json.iter || ITER_DEFAULT);
     const proof = await hmacHex(authKey, c.json.challenge);
@@ -365,6 +414,7 @@ export function useCollection() {
     }
     setError("");
     setStatus("ready");
+    setSaveState("saved");
     return { ok: true };
   }, [applyAuth]);
 
@@ -385,13 +435,14 @@ export function useCollection() {
     dirtyRef.current = true;
     setError("");
     setStatus("ready");
+    setSaveState("saved");
     enqueueSave(fresh);
     return { ok: true };
   }, [applyAuth]);
 
-  /* 手动从云端重新拉取 */
+  /* 手动从云端重新拉取（返回 {ok, error} 供调用方判定成败，避免读过期 state） */
   const reload = useCallback(async () => {
-    if (!sessionRef.current) return;
+    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
     setStatus("loading");
     setError("");
     const r = await apiGetData(sessionRef.current);
@@ -403,14 +454,19 @@ export function useCollection() {
       setSavedAt(baseSavedAtRef.current);
       dirtyRef.current = false;
       setStatus("ready");
+      setSaveState("saved");
+      return { ok: true };
     } else if (r.status === 401) {
       clearAuth();
       localStorage.removeItem(CACHE_KEY);
       setData(null);
       setStatus("idle");
+      return { ok: false, error: "登录已过期，请重新登录" };
     } else {
-      setError(r.status === 0 ? "网络异常，请稍后重试" : `云端异常 (HTTP ${r.status})`);
+      const msg = r.status === 0 ? "网络异常，请稍后重试" : `云端异常 (HTTP ${r.status})`;
+      setError(msg);
       setStatus("error");
+      return { ok: false, error: msg };
     }
   }, [clearAuth]);
 

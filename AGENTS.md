@@ -40,13 +40,15 @@ assets/fonts/        江西拙楷字体
 
 ## 云端数据契约（改数据结构必读）
 
-- 存储：R2 桶 `proton-collect-sync` 下 `collections/<uid>.json`，服务端自动保留最近 5 个版本快照
-- 格式 `v2`：`folders`（分组+书签，子分组嵌 children 变卡片标签页）/ `quickSites` / `iframeWidgets` / `settings` / `layout`（数组顺序即显示顺序；`w` 列跨度以「参考 10 列」坐标系存储，渲染按实际列数 10/6/4/2 换算；`h` 最小行数，0=不限，内容永远完整展开）
-- API：`GET /api/sync/:uid` 读、`PUT /api/sync/:uid` 整体写入；认证 `Authorization: Bearer <token>`（扩展内置同一 token，网页版由 Worker 注入页面）
-- 改字段需同步改三处：`services/collection.js`（前端契约）、`worker/src/worker.js`（服务端）、README 数据契约段落，并考虑旧数据兼容
+- 存储：R2 桶（Worker 绑定名 `BUCKET`）：`pt/accounts/<uid>.json`（账号：PBKDF2 盐 + 派生 authKey）、`pt/data/<uid>.json`（最新数据 `{savedAt, data}`）、`pt/data/<uid>/snap-*.json`（保留最近 5 份快照）
+- 账号：注册提交 PBKDF2-SHA256(密码, 盐, 600k 迭代) 派生的 authKey（明文密码永不上传）；登录为挑战应答（HMAC-SHA256(authKey, challenge)）；会话为无状态令牌 `uid|exp|HMAC(SYNC_TOKEN, uid|exp)`，30 天有效
+- API：`POST /api/register` / `POST /api/challenge` / `POST /api/login`（无需令牌，per-IP 限流）；`GET/PUT /api/data`（需 `Authorization: Bearer <会话令牌>`，uid 从令牌解析；PUT ≤8MB 且携带 `X-Base-SavedAt` 乐观锁，与云端 savedAt 不一致返回 409）
+- `data` 格式：`folders`（分组+书签，子分组嵌 children 变卡片标签页）/ `quickSites` / `iframeWidgets` / `settings` / `layout`（`i` 卡片标识，`x`/`w` 以参考 10 列坐标系存储、`y`/`h` 为像素；渲染按实际列数 10/6/4/2 等比换算；内容永远完整展开）
+- 改字段需同步改三处：`services/collection.js` + `hooks/useCollection.js`（前端契约，注意 `ensureShape` 深度归一）、`worker/src/worker.js`（服务端）、README 数据契约段落，并考虑旧数据兼容
+- 已知限制：并发 PUT 的「读版本→比对→写入」非原子（未用 R2 条件写），极端并发下可能后写覆盖先写
 
 ## 注意
 
-- 用户 ID 即身份、无密码。不要在日志、提交、示例中输出任何真实用户 ID 的收藏数据
+- 用户以 ID + 密码登录（密码只本地派生、明文永不上传）。不要在日志、提交、示例中输出任何真实用户 ID 的收藏数据
 - 版本号在 `package.json`（扩展 manifest 继承它）
 - `node_modules/`、`.output/`、`dist-web/` 等构建产物不入库；隐私相关说明见 `privacy.html`
