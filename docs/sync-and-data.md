@@ -111,7 +111,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
   "quickSites": [                  // 常用网站卡
     { "id": "qs_xxx", "title": "GitHub", "url": "https://github.com", "favicon": "" }
   ],
-  "iframeWidgets": [               // iframe 小部件卡（h = 高度档位，⋯ 菜单可调）
+  "iframeWidgets": [               // iframe 小部件卡（h = 卡片高度像素值，⋯ 菜单可调，200-2000）
     { "id": "iw_xxx", "title": "监控", "url": "https://…", "h": 420 }
   ],
   "settings": {                    // 随账号同步的偏好

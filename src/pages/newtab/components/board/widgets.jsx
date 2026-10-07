@@ -194,8 +194,19 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
   const [reloadKey, setReloadKey] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false); // 首次滚入视口后保持 true，避免来回滚动反复重载
+  const [hDraft, setHDraft] = useState(null); // 自定义高度草稿（字符串，Enter/失焦提交）
   const bodyRef = useRef(null);
   const menuRef = useRef(null);
+
+  /* 提交自定义高度：钳位 200-2000，非法输入回退当前值 */
+  const commitH = () => {
+    setHDraft((draft) => {
+      if (draft === null) return null;
+      const n = Math.round(Number(draft));
+      if (Number.isFinite(n) && n >= 200 && n <= 2000) onUpdate(widget.id, { h: n });
+      return null;
+    });
+  };
 
   /* 懒挂载：几何检测 + 滚动/缩放监听（不用 IntersectionObserver——
      个别内嵌 webview 不派发其回调，会把部件卡死在占位态） */
@@ -248,7 +259,7 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
               <div className="widget-menu">
                 {onUpdate && (
                   <>
-                    <div className="widget-menu-label">高度</div>
+                    <div className="widget-menu-label">高度（像素，200-2000）</div>
                     <div className="widget-menu-heights">
                       {[240, 420, 600, 800].map((px) => (
                         <button
@@ -257,13 +268,28 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
                           className={`widget-h-chip${(widget.h || 420) === px ? " on" : ""}`}
                           onClick={() => {
                             onUpdate(widget.id, { h: px });
-                            setMenuOpen(false);
+                            setHDraft(null);
                           }}
                         >
                           {px}
                         </button>
                       ))}
                     </div>
+                    <input
+                      className="widget-h-input"
+                      type="number"
+                      min={200}
+                      max={2000}
+                      step={10}
+                      placeholder="自定义…"
+                      value={hDraft ?? ""}
+                      onChange={(e) => setHDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitH();
+                        if (e.key === "Escape") setHDraft(null);
+                      }}
+                      onBlur={commitH}
+                    />
                     <div className="widget-menu-divider" />
                   </>
                 )}

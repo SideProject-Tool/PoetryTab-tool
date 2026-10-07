@@ -369,6 +369,31 @@
   font-weight: 700;
 }
 
+/* 自定义高度输入 */
+.widget-h-input {
+  width: calc(100% - 0.7rem);
+  margin: 0 0.35rem 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.76rem;
+  font-family: inherit;
+}
+
+.widget-h-input:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+}
+
+/* 隐藏 number 输入的上下箭头（保持菜单紧凑） */
+.widget-h-input::-webkit-outer-spin-button,
+.widget-h-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .widget-menu-divider {
   height: 1px;
   margin: 0.25rem 0.45rem 0.3rem;
