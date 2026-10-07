@@ -1,17 +1,14 @@
-import { useState, useEffect, useCallback, useMemo, Component } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
 import "./App.css";
 import BookmarkSearch from "./components/BookmarkSearch";
 import BookmarkBoard from "./components/BookmarkBoard";
 import SettingsPanel from "./components/SettingsPanel";
 import { useCollection } from "./hooks/useCollection";
-import { FONTNAME_LIST } from "./services/constants";
+import { FONTNAME_LIST, THEME_NAMES, SEARCH_ENGINES } from "./services/constants";
 import { useContentEngine } from "./hooks/useContentEngine";
-import { flattenForSearch } from "./services/collection";
-import { SEARCH_ENGINES } from "./services/constants";
+import { flattenForSearch, safeUrl } from "./services/collection";
+import { openUrl } from "../../platform";
 import { IoSearchOutline as SearchIcon, IoCloseOutline as CloseIcon } from "react-icons/io5";
-
-
-const THEME_NAMES = { light: "cupcake", dark: "halloween" };
 
 /* 渲染异常兜底：数据损坏时给出可操作的恢复入口，避免整页白屏（每次开新标签页都复现） */
 class ErrorBoundary extends Component {
@@ -86,25 +83,47 @@ export default function App() {
     document.title = "Poetry-Tab";
   }, []);
 
-  /* 快捷键 S：呼出搜索（焦点在输入框时忽略） */
+  /* 快捷键：S 呼出搜索、1-9 直达常用网站（焦点在输入框时忽略） */
+  const appliedSearchRef = useRef("");
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target && e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
       if (e.key === "s" || e.key === "S") {
         e.preventDefault();
-        setSearchOpen(true);
+        setSearchOpen(true); // 快捷键呼出为临时态（不写云端设置）
+      } else if (/^[1-9]$/.test(e.key)) {
+        const site = col.data?.quickSites?.[Number(e.key) - 1];
+        if (site) {
+          const url = safeUrl(site.url);
+          if (url) openUrl(url);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [col.data]);
+
+  /* 搜索栏开合：默认跟随云端 settings.showSearch（换账号时重新应用）；按钮切换会写回云端 */
+  useEffect(() => {
+    if (!col.data || appliedSearchRef.current === col.uid) return;
+    appliedSearchRef.current = col.uid;
+    setSearchOpen(!!col.data.settings?.showSearch);
+  }, [col.data, col.uid]);
+  const toggleSearch = useCallback(() => {
+    setSearchOpen((o) => {
+      const next = !o;
+      col.setSettings({ showSearch: next });
+      return next;
+    });
+  }, [col]);
 
   /* 诗词：按展示类别随机抽取，点击换一首 */
   const { getRandomContent, currentContent } = useContentEngine(settings.cats);
   const [poem, setPoem] = useState(null);
   const [poemFading, setPoemFading] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false); // 搜索框默认隐藏，右上角按钮呼出
+  const [searchOpen, setSearchOpen] = useState(false); // 默认隐藏（诗词区留白）；S 呼出 / 云端设置常驻
+  const poemTimerRef = useRef(null);
 
   useEffect(() => {
     getRandomContent();
@@ -114,12 +133,15 @@ export default function App() {
   }, [currentContent]);
 
   const rotatePoem = useCallback(() => {
+    if (poemTimerRef.current) return; // 上一次切换的淡出还没结束，忽略连点
     setPoemFading(true);
-    setTimeout(() => {
+    poemTimerRef.current = setTimeout(() => {
+      poemTimerRef.current = null;
       getRandomContent();
       setPoemFading(false);
     }, 250);
   }, [getRandomContent]);
+  useEffect(() => () => { if (poemTimerRef.current) clearTimeout(poemTimerRef.current); }, []);
 
   const engine = SEARCH_ENGINES[settings.engine] || SEARCH_ENGINES.baidu;
   const poemQuery = poem ? [poem.title, poem.from, poem.who].filter(Boolean).join(" ") : "";
@@ -164,7 +186,7 @@ export default function App() {
       {/* 搜索开关（右上角，默认隐藏搜索框） */}
       <button
         className="search-toggle"
-        onClick={() => setSearchOpen((o) => !o)}
+        onClick={toggleSearch}
         title={searchOpen ? "关闭搜索 (Esc)" : "搜索收藏 (S)"}
         type="button"
       >
@@ -192,6 +214,15 @@ export default function App() {
           title={col.error || ""}
         >
           {col.saveState === "conflict" ? "云端有更新 · 本地未同步" : "未同步 · 自动重试中"}
+        </div>
+      )}
+
+      {/* 删除撤销 toast：6 秒内可一键恢复 */}
+      {col.undoInfo && (
+        <div className="undo-toast">
+          <span>{col.undoInfo.label}</span>
+          <button type="button" onClick={col.undoRemove}>撤销</button>
+          <button type="button" className="undo-dismiss" onClick={col.dismissUndo} title="关闭">✕</button>
         </div>
       )}
       </div>

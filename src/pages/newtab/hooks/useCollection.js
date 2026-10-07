@@ -8,14 +8,22 @@ import {
   genId,
   SETTINGS_DEFAULTS,
 } from "../services/collection";
+import { countLinks, mergeImportedTree } from "../services/bookmarks";
 
 /*
- * 用户体系与云同步（v4 全新方案，与旧版协议不兼容）
+ * 用户体系与云同步
  *
  * 认证流程（密码永不明文传输/存储）：
  *   注册  客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k) → authKey 提交
  *   登录  /api/challenge 拿一次性挑战 + 盐 → 重派生 authKey → HMAC(authKey, challenge) 应答
  *   会话  登录后持无状态令牌（30 天），此后数据读写仅凭令牌
+ *
+ * 多设备/多标签页并发策略：
+ *   写入为整份覆盖 + 乐观锁（X-Base-SavedAt）；409 冲突时本地有未同步修改 → 强制仲裁
+ *   （saveState=conflict，自动保存暂停，须在设置面板「上传到云端=本地为准 / 从云端恢复=云端为准」二选一），
+ *   仲裁前不存在静默覆盖云端的路径。
+ *   同浏览器多标签页经 BroadcastChannel 广播保存结果：未编辑的标签页即时采纳最新数据，
+ *   编辑中的标签页保持本地，由下一次保存的 409 进入仲裁。
  *
  * 状态机 status：
  *   idle   未登录（显示引导门）
@@ -24,7 +32,7 @@ import {
  *   ready  已就绪
  *   error  网络异常（error 必有可读信息）
  *
- * localStorage：pt.uid / pt.session / pt.cache
+ * localStorage：pt.uid / pt.session / pt.cache（{uid, savedAt, dirty, data}，账号隔离）
  */
 
 const UID_KEY = "pt.uid";
@@ -32,6 +40,7 @@ const SESSION_KEY = "pt.session";
 const CACHE_KEY = "pt.cache";
 const SAVE_DEBOUNCE = 700;
 const ITER_DEFAULT = 600000;
+const FETCH_TIMEOUT = 15000; // 网络请求超时：避免挂死在 saving/boot
 
 /* ---------- WebCrypto 工具 ---------- */
 const enc = new TextEncoder();
@@ -62,77 +71,87 @@ async function deriveAuthKey(password, saltHex, iterations) {
   return bytesToHex(bits);
 }
 
-/* ---------- API ---------- */
-async function apiPost(path, body) {
+/* ---------- API（统一 15s 超时） ---------- */
+async function fetchJson(url, init = {}) {
   try {
-    const res = await fetch(CLOUD_SYNC.url + path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     let json = null;
     try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
     return { status: res.status, json };
   } catch {
-    return { status: 0, json: null }; // 网络不可达
+    return { status: 0, json: null }; // 网络不可达/超时
   }
 }
-async function apiGetData(session) {
-  try {
-    const res = await fetch(CLOUD_SYNC.url + "/api/data", {
-      headers: { Authorization: `Bearer ${session}` },
-    });
-    let json = null;
-    try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
-    return { status: res.status, json };
-  } catch {
-    return { status: 0, json: null };
-  }
+async function apiPost(path, body) {
+  return fetchJson(CLOUD_SYNC.url + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+/** GET 数据；携带 If-None-Match（上次云端版本）命中时返回 {status:304}，调用方沿用本地数据 */
+async function apiGetData(session, etag) {
+  const headers = { Authorization: `Bearer ${session}` };
+  if (etag) headers["If-None-Match"] = `"${etag}"`;
+  return fetchJson(CLOUD_SYNC.url + "/api/data", { headers });
 }
 async function apiPutData(session, data, baseSavedAt) {
-  try {
-    const res = await fetch(CLOUD_SYNC.url + "/api/data", {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${session}`,
-        "Content-Type": "application/json",
-        "X-Base-SavedAt": baseSavedAt || "",
-      },
-      body: JSON.stringify(data),
-    });
-    let json = null;
-    try { json = await res.json(); } catch { /* 非 JSON 响应 */ }
-    return { status: res.status, json };
-  } catch {
-    return { status: 0, json: null };
-  }
+  return fetchJson(CLOUD_SYNC.url + "/api/data", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${session}`,
+      "Content-Type": "application/json",
+      "X-Base-SavedAt": baseSavedAt || "",
+    },
+    body: JSON.stringify(data),
+  });
+}
+async function apiListSnaps(session) {
+  return fetchJson(CLOUD_SYNC.url + "/api/snaps", { headers: { Authorization: `Bearer ${session}` } });
+}
+async function apiRestoreSnap(session, key) {
+  return fetchJson(CLOUD_SYNC.url + "/api/snap/restore", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
 }
 
-/* ---------- 本地缓存 ---------- */
-function readCache() {
+/* ---------- 本地缓存（账号隔离 + 版本号 + dirty 持久化） ---------- */
+/** 读取当前账号的缓存；缓存属其他账号（切换登录后的残留）时弃用，避免闪现他人收藏 */
+function readCache(uid) {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && Array.isArray(parsed.folders) ? ensureShape(parsed) : null;
+    if (!parsed || parsed.uid !== uid || !parsed.data || !Array.isArray(parsed.data.folders)) return null;
+    return { savedAt: parsed.savedAt || "", dirty: !!parsed.dirty, data: ensureShape(parsed.data) };
   } catch {
     return null;
   }
 }
-function writeCache(data) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* 容量不足时放弃缓存 */ }
+function writeCache(uid, data, savedAt, dirty) {
+  if (!uid) return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, savedAt: savedAt || "", dirty: !!dirty, data }));
+  } catch { /* 容量不足时放弃缓存 */ }
+}
+function clearCache() {
+  try { localStorage.removeItem(CACHE_KEY); } catch { /* 无痕模式等 */ }
 }
 function defaultData() {
   return {
+    v: 1,
     folders: [{ id: genId("f"), title: "我的收藏", children: [] }],
     quickSites: [],
     iframeWidgets: [],
     settings: { ...SETTINGS_DEFAULTS },
-    layout: [],
+    layout: { v: 2, cols: [[], [], [], [], []] },
   };
 }
 /** 云端数据兜底：数组字段缺失/损坏时补默认值。
- *  深度归一：folder 补 children、剔除 null/非对象项、settings.cats 非数组回退默认，避免畸形数据渲染崩溃 */
+ *  深度归一：folder 补 children、剔除 null/非对象项、settings.cats 非数组回退默认，避免畸形数据渲染崩溃。
+ *  layout 保持原样透传：新格式为对象 {v:2,cols}（旧客户端按缺失处理自动装箱），旧格式为坐标数组 */
 function ensureShape(d) {
   if (!d || typeof d !== "object") return defaultData();
   const normList = (list) =>
@@ -143,12 +162,14 @@ function ensureShape(d) {
     ...(d.settings && typeof d.settings === "object" ? d.settings : {}),
   };
   if (!Array.isArray(settings.cats)) settings.cats = [...SETTINGS_DEFAULTS.cats];
+  if (!Array.isArray(settings.hiddenCards)) settings.hiddenCards = [];
   return {
     ...d,
+    v: d.v || 1,
     folders,
     quickSites: normList(d.quickSites),
     iframeWidgets: normList(d.iframeWidgets),
-    layout: normList(d.layout),
+    layout: d.layout ?? { v: 2, cols: [[], [], [], [], []] },
     settings,
   };
 }
@@ -166,29 +187,45 @@ function enqueueSave(snapshot) {
   }).catch(() => { /* 失败状态已在 persistFn 中标记 */ });
 }
 
+/* ---------- 跨标签页广播：同一账号保存成功后通知其他标签页 ---------- */
+const SYNC_CHANNEL = "poetry-tab-sync";
+function broadcastSync(msg) {
+  try {
+    if (typeof BroadcastChannel !== "undefined") new BroadcastChannel(SYNC_CHANNEL).postMessage(msg);
+  } catch { /* 广播失败不影响主流程 */ }
+}
+
 /* ---------- Hook ---------- */
 export function useCollection() {
   const [uid, setUid] = useState(() => localStorage.getItem(UID_KEY) || "");
   const [session, setSession] = useState(() => localStorage.getItem(SESSION_KEY) || "");
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
   const hasUid = Boolean(uid && session);
 
-  const [data, setData] = useState(() => readCache());
+  const cachedBoot = useRef(null); // 启动时读一次缓存（含 savedAt/dirty），供 boot 流程判定
+  if (cachedBoot.current === null) {
+    cachedBoot.current = uid ? readCache(uid) : null;
+  }
+  const [data, setData] = useState(() => cachedBoot.current?.data || null);
   const [status, setStatus] = useState(() => (session ? "boot" : "idle"));
   const [error, setError] = useState("");
   const [saveState, setSaveState] = useState("saved"); // saved | saving | error | conflict
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
-  const [savedAt, setSavedAt] = useState("");
+  const [savedAt, setSavedAt] = useState(() => cachedBoot.current?.savedAt || "");
   const dataRef = useRef(data);
   const saveTimer = useRef(null);
-  const baseSavedAtRef = useRef(""); // 乐观锁：客户端持有的云端版本（savedAt），冲突时服务端拒绝
-  const dirtyRef = useRef(false); // 有未落库的本地改动
+  const baseSavedAtRef = useRef(cachedBoot.current?.savedAt || ""); // 乐观锁：客户端持有的云端版本
+  const dirtyRef = useRef(!!cachedBoot.current?.dirty); // 有未落库的本地改动
+  const conflictCloudSavedAtRef = useRef(""); // 冲突时云端的版本号：强制「以本地为准」上传时使用
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const applyAuth = useCallback((id, token) => {
     sessionRef.current = token; // 同步更新：登录/注册后立即入队的保存必须拿到新会话
+    uidRef.current = id;
     setUid(id);
     setSession(token);
     localStorage.setItem(UID_KEY, id);
@@ -202,102 +239,167 @@ export function useCollection() {
     localStorage.removeItem(SESSION_KEY);
   }, []);
 
-  /* 落库（队列消费端）：携带版本号乐观锁；401 会话过期自动登出；409 冲突让位于云端 */
+  const resetToIdle = useCallback(() => {
+    clearCache();
+    conflictCloudSavedAtRef.current = "";
+    baseSavedAtRef.current = "";
+    dirtyRef.current = false;
+    cachedBoot.current = null;
+    setUid("");
+    setSession("");
+    uidRef.current = "";
+    sessionRef.current = "";
+    setData(null);
+    setStatus("idle");
+    setError("");
+    setSaveState("saved");
+    setSavedAt("");
+  }, [clearAuth]);
+
+  /** 冲突仲裁之一：放弃本地，以云端为准（拉取并采纳；云端为空则回到默认数据） */
+  const adoptCloud = useCallback(async () => {
+    const latest = await apiGetData(sessionRef.current);
+    if (latest.status !== 200 || !latest.json) return false;
+    const d = latest.json.data ? ensureShape(latest.json.data) : defaultData();
+    dataRef.current = d;
+    setData(d);
+    writeCache(uidRef.current, d, latest.json.savedAt || "", false);
+    baseSavedAtRef.current = latest.json.savedAt || "";
+    setSavedAt(baseSavedAtRef.current);
+    dirtyRef.current = false;
+    conflictCloudSavedAtRef.current = "";
+    setSaveState("saved");
+    setError("");
+    return true;
+  }, []);
+
+  /* 落库（队列消费端）：携带版本号乐观锁；401 会话过期自动登出；409 冲突进入强制仲裁 */
   const persistNow = useCallback(async (snapshot) => {
     setSaveState("saving");
-    const r = await apiPutData(sessionRef.current, snapshot, baseSavedAtRef.current);
+    // 冲突仲裁「以本地为准」：借用云端当前版本号通过乐观锁，覆盖云端
+    const inConflict = saveStateRef.current === "conflict" && conflictCloudSavedAtRef.current;
+    const base = inConflict ? conflictCloudSavedAtRef.current : baseSavedAtRef.current;
+    const r = await apiPutData(sessionRef.current, snapshot, base);
     if (r.status === 200) {
       baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+      conflictCloudSavedAtRef.current = "";
       if (snapshot === dataRef.current) dirtyRef.current = false; // 快照入队后又有新编辑则保持 dirty
+      writeCache(uidRef.current, snapshot, baseSavedAtRef.current, dirtyRef.current);
       setSavedAt(baseSavedAtRef.current);
       setSaveState("saved");
+      broadcastSync({ type: "sync", uid: uidRef.current, savedAt: baseSavedAtRef.current, data: snapshot });
       return;
     }
     if (r.status === 401) {
       // 会话过期：本地未同步的改动无法上云，回到登录门（下次登录以云端为准）
-      clearAuth();
-      localStorage.removeItem(CACHE_KEY);
-      setUid("");
-      setSession("");
-      setData(null);
-      setStatus("idle");
-      setSaveState("saved");
-      setSavedAt("");
-      setError("");
+      resetToIdle();
       return;
     }
     if (r.status === 409) {
-      // 其他设备已先保存：本地有未同步修改时保留本地（saveState=conflict，由用户在设置面板
-      // 手动选择「上传到云端」=本地为准 / 「从云端恢复」=云端为准）；无未同步修改才自动载入云端
-      baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
+      // 其他设备已先保存：本地有未同步修改 → 强制仲裁（暂停自动保存，等用户在设置面板
+      // 选「上传到云端」=本地为准 / 「从云端恢复」=云端为准）；无未同步修改才自动载入云端。
+      // 注意：不 rebase 本地乐观锁版本，保证仲裁前不存在任何静默覆盖云端的路径
+      const cloudSavedAt = (r.json && r.json.savedAt) || "";
+      conflictCloudSavedAtRef.current = cloudSavedAt;
       if (dirtyRef.current) {
         setSaveState("conflict");
-        setError("云端有更新，已保留本地修改");
+        setError("云端有其他设备的修改，请在设置中选择以本地或云端为准");
         return;
       }
-      const latest = await apiGetData(sessionRef.current);
-      if (latest.status === 200 && latest.json && latest.json.data) {
-        const d = ensureShape(latest.json.data);
-        dataRef.current = d;
-        setData(d);
-        writeCache(d);
-        baseSavedAtRef.current = latest.json.savedAt || "";
-        dirtyRef.current = false;
+      const adopted = await adoptCloud();
+      if (!adopted) {
+        setSaveState("error");
+        setError("检测到其他设备的修改，但拉取云端失败，请稍后重试");
       }
-      setSaveState("error");
-      setError("检测到其他设备的修改，已载入云端最新版本");
       return;
     }
     setSaveState("error");
     setError(r.status === 0 ? "网络异常，保存未完成" : `保存失败 (HTTP ${r.status})`);
-  }, [clearAuth]);
+  }, [adoptCloud, resetToIdle]);
   useEffect(() => {
     persistFn = persistNow;
     return () => { persistFn = null; };
   }, [persistNow]);
 
-  /* 启动恢复：持会话则静默拉取；令牌失效回门禁 */
+  /* 跨标签页：其他标签页保存成功 → 未编辑的本标签页即时采纳（编辑中的等 409 仲裁，绝不静默覆盖） */
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(SYNC_CHANNEL);
+    ch.onmessage = (ev) => {
+      const msg = ev.data || {};
+      if (msg.type !== "sync" || msg.uid !== uidRef.current) return;
+      if (dirtyRef.current || saveStateRef.current === "conflict") return;
+      const d = msg.data && Array.isArray(msg.data.folders) ? ensureShape(msg.data) : null;
+      if (!d) return;
+      dataRef.current = d;
+      setData(d);
+      writeCache(msg.uid, d, msg.savedAt || "", false);
+      baseSavedAtRef.current = msg.savedAt || baseSavedAtRef.current;
+      setSavedAt(baseSavedAtRef.current);
+    };
+    return () => ch.close();
+  }, []);
+
+  /* 启动恢复：持会话则带 If-None-Match 条件拉取（命中 304 直接用本地缓存，开标签页零流量） */
   useEffect(() => {
     if (!sessionRef.current) return;
     let alive = true;
     (async () => {
-      const r = await apiGetData(sessionRef.current);
+      const cached = cachedBoot.current;
+      const r = await apiGetData(sessionRef.current, cached?.savedAt);
       if (!alive) return;
+      if (r.status === 304) {
+        // 云端仍是缓存版本：沿用缓存数据（含本地未同步的 dirty 改动，正常防抖续传）
+        if (cached) {
+          dirtyRef.current = !!cached.dirty;
+          setData(cached.data);
+          baseSavedAtRef.current = cached.savedAt;
+          setSavedAt(cached.savedAt);
+        }
+        setStatus("ready");
+        return;
+      }
       if (r.status === 200) {
         const d = r.json && r.json.data;
+        const cloudSavedAt = (r.json && r.json.savedAt) || "";
+        if (cached && cached.dirty && d && cloudSavedAt !== cached.savedAt) {
+          // 关页前有未同步修改，且云端已被其他设备推进：直接进入强制仲裁，保住本地改动
+          conflictCloudSavedAtRef.current = cloudSavedAt;
+          baseSavedAtRef.current = cached.savedAt;
+          dirtyRef.current = true;
+          setSaveState("conflict");
+          setError("云端有其他设备的修改，请在设置中选择以本地或云端为准");
+          setStatus("ready");
+          return;
+        }
         if (d) {
-          if (dirtyRef.current) {
-            // 启动窗口内已有本地编辑：不覆盖本地，仅把乐观锁 rebase 到云端当前版本
-            baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
-            setSavedAt(baseSavedAtRef.current);
-            setStatus("ready");
-            return;
-          }
           const shaped = ensureShape(d);
+          dataRef.current = shaped;
           setData(shaped);
-          writeCache(shaped);
-          baseSavedAtRef.current = (r.json && r.json.savedAt) || "";
-          setSavedAt(baseSavedAtRef.current);
+          writeCache(uidRef.current, shaped, cloudSavedAt, false);
+          baseSavedAtRef.current = cloudSavedAt;
+          dirtyRef.current = false;
+          setSavedAt(cloudSavedAt);
           setStatus("ready");
         } else {
           const fresh = defaultData();
+          dirtyRef.current = true;
           setData(fresh);
+          writeCache(uidRef.current, fresh, "", true);
           setStatus("ready");
           enqueueSave(fresh); // 有会话但云端无数据（注册后未落库过）：补一份默认数据
         }
         return;
       }
       if (r.status === 401) {
-        clearAuth();
-        setData(null);
-        setStatus("idle");
+        resetToIdle();
         return;
       }
       setError(r.status === 0 ? "无法连接云端，请检查网络后点击重试" : `云端异常 (HTTP ${r.status})，请稍后重试`);
       setStatus("error");
     })();
     return () => { alive = false; };
-  }, [clearAuth]);
+  }, [resetToIdle]);
 
   /* 保存调度 */
   const scheduleSave = useCallback(() => {
@@ -326,20 +428,20 @@ export function useCollection() {
     return () => clearInterval(t);
   }, [saveState]);
 
-  /** 所有修改经此入口：变更 → 防抖自动保存 */
+  /** 所有修改经此入口：变更 → 防抖自动保存。冲突待仲裁期间只改本地、暂停自动保存 */
   const mutate = useCallback((fn) => {
     if (!sessionRef.current) return;
     dirtyRef.current = true;
     setData((prev) => {
       const next = fn(prev);
       dataRef.current = next;
-      writeCache(next);
+      writeCache(uidRef.current, next, baseSavedAtRef.current, true);
       return next;
     });
-    scheduleSave();
+    if (saveStateRef.current !== "conflict") scheduleSave();
   }, [scheduleSave]);
 
-  /* 关页/切走前的兑底落库：防抖窗口内关闭标签页不再丢改动（keepalive 尽力而为） */
+  /* 关页/切走前的兜底落库：防抖窗口内关闭标签页也不丢改动（keepalive 尽力而为） */
   useEffect(() => {
     const flushOnHide = () => {
       if (!dirtyRef.current || !sessionRef.current || !dataRef.current) return;
@@ -371,6 +473,8 @@ export function useCollection() {
               baseSavedAtRef.current = j.savedAt;
               setSavedAt(j.savedAt);
               dirtyRef.current = false; // 仅成功后清 dirty；失败保持 dirty 以便下次 hide 重试
+              writeCache(uidRef.current, dataRef.current, j.savedAt, false);
+              broadcastSync({ type: "sync", uid: uidRef.current, savedAt: j.savedAt, data: dataRef.current });
             }
           })
           .catch(() => { /* 卸载期尽力而为 */ });
@@ -388,27 +492,27 @@ export function useCollection() {
   /* 登录：挑战应答式 */
   const login = useCallback(async (id, password) => {
     const c = await apiPost("/api/challenge", { uid: id });
-    if (c.status === 404) return { ok: false, code: "bad-id" };
     if (c.status === 400) return { ok: false, code: "bad-id" }; // uid 格式非法（服务端白名单校验）
     if (c.status !== 200 || !c.json || !c.json.challenge) return { ok: false, code: "network" };
     const authKey = await deriveAuthKey(password, c.json.salt, c.json.iter || ITER_DEFAULT);
     const proof = await hmacHex(authKey, c.json.challenge);
     const r = await apiPost("/api/login", { uid: id, challenge: c.json.challenge, proof });
-    if (r.status === 401) return { ok: false, code: "bad-password" };
-    if (r.status === 404) return { ok: false, code: "bad-id" };
+    if (r.status === 401) return { ok: false, code: "bad-login" }; // ID 不存在与密码错误统一提示，防枚举
     if (r.status !== 200 || !r.json || !r.json.session) return { ok: false, code: "network" };
     applyAuth(id, r.json.session);
     const d = r.json.data;
     if (d) {
       const shaped = ensureShape(d);
       setData(shaped);
-      writeCache(shaped);
+      writeCache(id, shaped, r.json.savedAt || "", false);
       baseSavedAtRef.current = r.json.savedAt || "";
       setSavedAt(baseSavedAtRef.current);
+      dirtyRef.current = false;
     } else {
       const fresh = defaultData();
+      dirtyRef.current = true;
       setData(fresh);
-      writeCache(fresh);
+      writeCache(id, fresh, "", true);
       baseSavedAtRef.current = "";
       enqueueSave(fresh);
     }
@@ -430,7 +534,7 @@ export function useCollection() {
     applyAuth(id, r.json.session);
     const fresh = defaultData();
     setData(fresh);
-    writeCache(fresh);
+    writeCache(id, fresh, "", true);
     baseSavedAtRef.current = "";
     dirtyRef.current = true;
     setError("");
@@ -440,75 +544,169 @@ export function useCollection() {
     return { ok: true };
   }, [applyAuth]);
 
-  /* 手动从云端重新拉取（返回 {ok, error} 供调用方判定成败，避免读过期 state） */
+  /* 手动从云端重新拉取（冲突仲裁「以云端为准」；返回 {ok, error} 供调用方判定成败） */
   const reload = useCallback(async () => {
     if (!sessionRef.current) return { ok: false, error: "尚未登录" };
     setStatus("loading");
     setError("");
-    const r = await apiGetData(sessionRef.current);
-    if (r.status === 200 && r.json && r.json.data) {
-      const shaped = ensureShape(r.json.data);
-      setData(shaped);
-      writeCache(shaped);
-      baseSavedAtRef.current = r.json.savedAt || "";
-      setSavedAt(baseSavedAtRef.current);
-      dirtyRef.current = false;
+    const ok = await adoptCloud();
+    if (ok) {
       setStatus("ready");
-      setSaveState("saved");
       return { ok: true };
-    } else if (r.status === 401) {
-      clearAuth();
-      localStorage.removeItem(CACHE_KEY);
-      setData(null);
-      setStatus("idle");
-      return { ok: false, error: "登录已过期，请重新登录" };
-    } else {
-      const msg = r.status === 0 ? "网络异常，请稍后重试" : `云端异常 (HTTP ${r.status})`;
-      setError(msg);
-      setStatus("error");
-      return { ok: false, error: msg };
     }
-  }, [clearAuth]);
+    const msg = "网络异常，请稍后重试";
+    setError(msg);
+    setStatus("ready");
+    return { ok: false, error: msg };
+  }, [adoptCloud]);
 
   const logout = useCallback(() => {
     clearAuth();
-    localStorage.removeItem(CACHE_KEY);
+    resetToIdle();
     try { sessionStorage.removeItem("gatePrefillUid"); } catch { /* 无痕模式等 */ }
-    baseSavedAtRef.current = "";
-    dirtyRef.current = false;
-    setUid("");
-    setSession("");
-    setData(null);
-    setStatus("idle");
-    setError("");
-    setSaveState("saved");
-    setSavedAt("");
-  }, [clearAuth]);
+  }, [clearAuth, resetToIdle]);
+
+  /* 历史快照：列表 + 恢复（恢复动作在服务端也留快照，可再次撤销） */
+  const listSnaps = useCallback(async () => {
+    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
+    const r = await apiListSnaps(sessionRef.current);
+    if (r.status === 200 && r.json && Array.isArray(r.json.snaps)) return { ok: true, snaps: r.json.snaps };
+    if (r.status === 401) { resetToIdle(); return { ok: false, error: "登录已过期，请重新登录" }; }
+    return { ok: false, error: r.status === 0 ? "网络异常" : `云端异常 (HTTP ${r.status})` };
+  }, [resetToIdle]);
+  const restoreSnap = useCallback(async (key) => {
+    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
+    const r = await apiRestoreSnap(sessionRef.current, key);
+    if (r.status === 200 && r.json && r.json.data) {
+      const d = ensureShape(r.json.data);
+      dataRef.current = d;
+      setData(d);
+      baseSavedAtRef.current = r.json.savedAt || "";
+      dirtyRef.current = false;
+      conflictCloudSavedAtRef.current = "";
+      writeCache(uidRef.current, d, baseSavedAtRef.current, false);
+      setSavedAt(baseSavedAtRef.current);
+      setSaveState("saved");
+      setError("");
+      broadcastSync({ type: "sync", uid: uidRef.current, savedAt: baseSavedAtRef.current, data: d });
+      return { ok: true };
+    }
+    if (r.status === 401) { resetToIdle(); return { ok: false, error: "登录已过期，请重新登录" }; }
+    return { ok: false, error: r.status === 0 ? "网络异常" : `恢复失败 (HTTP ${r.status})` };
+  }, [resetToIdle]);
+
+  /** 整份替换（导入备份/书签）：立即以本地为准上传；冲突状态下借用云端版本号完成覆盖 */
+  const replaceAll = useCallback(async (imported) => {
+    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
+    const d = ensureShape(typeof imported === "string" ? safeParse(imported) : imported);
+    if (!d) return { ok: false, error: "数据格式无法识别" };
+    dirtyRef.current = true;
+    dataRef.current = d;
+    setData(d);
+    writeCache(uidRef.current, d, baseSavedAtRef.current, true);
+    await saveNow();
+    return { ok: true };
+  }, [saveNow]);
+
+  /** 导入浏览器书签/HTML 书签树：追加为新分组并立即上传（重复 URL 自动跳过），返回导入统计 */
+  const importBookmarks = useCallback(async (tree) => {
+    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
+    const total = countLinks(tree);
+    if (!total) return { ok: false, error: "没有可导入的书签" };
+    const sink = { skipped: 0 };
+    mutate(mergeImportedTree(tree, sink));
+    await saveNow();
+    return { ok: true, count: total - sink.skipped, skipped: sink.skipped };
+  }, [mutate, saveNow]);
+
+  /* ---------- 删除撤销：删除前快照整份数据，6s 内可一键恢复 ---------- */
+  const [undoInfo, setUndoInfo] = useState(null); // {label, snapshot, until}
+  const undoTimer = useRef(null);
+  const removeWithUndo = useCallback((label, doRemove) => {
+    const snapshot = dataRef.current;
+    doRemove();
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    const info = { label, snapshot, until: Date.now() + 6000 };
+    setUndoInfo(info);
+    undoTimer.current = setTimeout(() => setUndoInfo(null), 6000);
+  }, []);
+  const undoRemove = useCallback(() => {
+    setUndoInfo((info) => {
+      if (info && info.until > Date.now() && info.snapshot) mutate(() => info.snapshot);
+      return null;
+    });
+  }, [mutate]);
+  const dismissUndo = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndoInfo(null);
+  }, []);
 
   /* ---------- CRUD ---------- */
-  const addItem = useCallback((folderId, item) => mutate((d) => addChildToFolder(d, folderId, { id: genId("b"), dateAdded: Date.now(), ...item })), [mutate]);
+  const addItem = useCallback((folderId, item) => {
+    const id = item.id || genId("b");
+    mutate((d) => addChildToFolder(d, folderId, { id, dateAdded: Date.now(), ...item }));
+    return id;
+  }, [mutate]);
+  /** 批量收录：一次 mutate 只触发一次保存；返回与 items 对应的 id 数组（无标题的条目可稍后补名） */
+  const addItems = useCallback((folderId, items) => {
+    const ids = [];
+    mutate((d) => items.reduce((acc, it) => {
+      const id = it.id || genId("b");
+      ids.push(id);
+      return addChildToFolder(acc, folderId, { id, dateAdded: Date.now(), ...it });
+    }, d));
+    return ids;
+  }, [mutate]);
   const addFolder = useCallback((parentOrTitle, maybeTitle) => {
     if (maybeTitle !== undefined) return mutate((d) => addChildToFolder(d, parentOrTitle, { id: genId("f"), title: maybeTitle, children: [] }));
     return mutate((d) => ({ ...d, folders: [...d.folders, { id: genId("f"), title: parentOrTitle, children: [] }] }));
   }, [mutate]);
   const renameNode = useCallback((id, title) => mutate((d) => updateItem(d, id, { title })), [mutate]);
   const updateNode = useCallback((id, patch) => mutate((d) => updateItem(d, id, patch)), [mutate]);
-  const removeNode = useCallback((id) => mutate((d) => removeItem(d, id)), [mutate]);
+  const removeNode = useCallback((id) => removeWithUndo("已删除分组或书签", () => mutate((d) => removeItem(d, id))), [mutate, removeWithUndo]);
   const moveNode = useCallback((id, dir) => mutate((d) => moveItem(d, id, dir)), [mutate]);
-  const addQuickSite = useCallback((site) => mutate((d) => ({ ...d, quickSites: [{ id: genId("qs"), favicon: "", ...site }, ...d.quickSites] })), [mutate]);
+  const addQuickSite = useCallback((site) => {
+    const id = site.id || genId("qs");
+    mutate((d) => ({ ...d, quickSites: [{ id, favicon: "", dateAdded: Date.now(), ...site }, ...d.quickSites] }));
+    return id;
+  }, [mutate]);
+  /** 批量收录常用网站（一次保存）；返回 id 数组 */
+  const addQuickSites = useCallback((items) => {
+    const ids = [];
+    mutate((d) => ({
+      ...d,
+      quickSites: [...items.map((it) => {
+        const id = it.id || genId("qs");
+        ids.push(id);
+        return { id, favicon: "", dateAdded: Date.now(), ...it };
+      }), ...d.quickSites],
+    }));
+    return ids;
+  }, [mutate]);
   const updateQuickSite = useCallback((id, patch) => mutate((d) => ({ ...d, quickSites: d.quickSites.map((s) => (s.id === id ? { ...s, ...patch } : s)) })), [mutate]);
-  const removeQuickSite = useCallback((id) => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) })), [mutate]);
+  const removeQuickSite = useCallback((id) => removeWithUndo("已删除常用网站", () => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) }))), [mutate, removeWithUndo]);
   const addIframe = useCallback((widget) => mutate((d) => ({ ...d, iframeWidgets: [...(d.iframeWidgets || []), { id: genId("iw"), ...widget }] })), [mutate]);
-  const removeIframe = useCallback((id) => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).filter((w) => w.id !== id) })), [mutate]);
+  const removeIframe = useCallback((id) => removeWithUndo("已删除小部件", () => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).filter((w) => w.id !== id) }))), [mutate, removeWithUndo]);
+  const updateIframe = useCallback((id, patch) => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).map((w) => (w.id === id ? { ...w, ...patch } : w)) })), [mutate]);
   const setLayout = useCallback((layout) => mutate((d) => ({ ...d, layout })), [mutate]);
   const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } })), [mutate]);
 
   return {
     uid, hasUid, data, status, error, saveState, savedAt,
     login, register, reload, saveNow, logout,
-    addItem, addFolder, renameNode, updateNode, removeNode, moveNode,
-    addQuickSite, updateQuickSite, removeQuickSite,
-    addIframe, removeIframe,
+    listSnaps, restoreSnap, replaceAll, importBookmarks,
+    addItem, addItems, addFolder, renameNode, updateNode, removeNode, moveNode,
+    addQuickSite, addQuickSites, updateQuickSite, removeQuickSite,
+    addIframe, removeIframe, updateIframe,
     setLayout, setSettings,
+    undoInfo, undoRemove, dismissUndo,
   };
+}
+
+function safeParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }

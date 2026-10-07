@@ -1,628 +1,36 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { useDraggable } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
 import {
   IoAddOutline as AddIcon,
-  IoOpenOutline as OpenIcon,
-  IoTrashOutline as TrashIcon,
-  IoReloadOutline as ReloadIcon,
   IoCloseOutline as CloseIcon,
   IoFolderOutline as FolderIcon,
-  IoCreateOutline as EditIcon,
-  IoEllipsisHorizontalOutline as MoreIcon,
-  IoCheckmarkOutline as CheckIcon,
-  IoArrowUpOutline as UpIcon,
-  IoArrowDownOutline as DownIcon,
   IoGridOutline as GridIcon,
-  IoBookOutline as PoemIcon,
-  IoCloudOutline as CloudSyncIcon,
 } from "react-icons/io5";
-import { openUrl } from "../../../platform";
-import { findNode, safeUrl } from "../services/collection";
-import { colsForWidth, REF_COLS } from "../grid";
-
-/**
- * 云端收藏看板（插件版与网页版共用这一个组件）。
- * - 流式网格：卡片高度随内容自适应（不在卡片内滚动），整页随内容增长、浏览器滚动条查看全部
- * - 卡片宽度 = 网格列跨度；可拖动排序、右下角把手调整宽度；列数随宽度自适应 10/6/4/2
- * - 布局（顺序 + 跨度）以参考列数 10 存到云端，跨设备一致
- * - 顶层分组 → 卡片；新建分组/添加小部件收进右下角悬浮按钮（不占网格）
- * - 每张卡片右上角 ⋯ 管理面板；所有修改防抖自动保存回云端
- */
-
-const GAP = 14; /* 卡片四周间隙：上下与左右一致 */
-const LEGACY_ROW_PX = 90; /* 旧版行单位换算（历史数据迁移用） */
-
-const PALETTE = [
-  "#c96f5e", "#7b9e56", "#5e89c9", "#b0785e", "#8a6fc9", "#c95e8a", "#5eb0a5", "#c9a35e",
-];
-
-function paletteColor(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-  return PALETTE[Math.abs(h) % PALETTE.length];
-}
-
-/* 新卡片默认列跨度（参考列数空间）：普通 2，iframe 小部件 3 */
-function defaultWidth(id) {
-  return id.startsWith("w:") ? 3 : 2;
-}
-
-/* ---------- 瓷贴 ---------- */
-
-function TileIcon({ item }) {
-  const [failed, setFailed] = useState(false);
-  if (item.children) {
-    return (
-      <span className="bt-icon bt-icon-folder">
-        <FolderIcon />
-      </span>
-    );
-  }
-  const label = item.title || item.url || "?";
-  const letter = label.trim().charAt(0).toUpperCase() || "?";
-  const tint = paletteColor(label);
-  if (item.favicon && !failed) {
-    return (
-      <span className="bt-icon">
-        <img src={item.favicon} alt="" loading="lazy" onError={() => setFailed(true)} />
-      </span>
-    );
-  }
-  return (
-    <span className="bt-icon" style={{ color: tint, background: tint + "1c" }}>
-      {letter}
-    </span>
-  );
-}
-
-function BookmarkTile({ item }) {
-  const url = safeUrl(item.url);
-  if (!url) {
-    // 云端数据中的失效/不安全 URL：降级为不可点占位，不让异常协议进入 href
-    return (
-      <span className="bt" style={{ opacity: 0.55, cursor: "default" }} title={item.title || ""}>
-        <TileIcon item={item} />
-        <span className="bt-label">{item.title || item.url || "无效链接"}</span>
-      </span>
-    );
-  }
-  return (
-    <a
-      href={url}
-      className="bt"
-      title={item.title}
-      onClick={(e) => {
-        if (e.ctrlKey || e.metaKey || e.button === 1) return;
-        e.preventDefault();
-        openUrl(url);
-      }}
-    >
-      <TileIcon item={item} />
-      <span className="bt-label">{item.title || item.url}</span>
-    </a>
-  );
-}
-
-function FolderTile({ folder, onOpen }) {
-  return (
-    <button type="button" className="bt" title={folder.title} onClick={() => onOpen(folder.id)}>
-      <TileIcon item={folder} />
-      <span className="bt-label">{folder.title}</span>
-    </button>
-  );
-}
-
-function TileGrid({ items, onOpenFolder }) {
-  return (
-    <div className="bt-grid">
-      {items.map((item) =>
-        item.children ? (
-          <FolderTile key={item.id} folder={item} onOpen={onOpenFolder} />
-        ) : (
-          <BookmarkTile key={item.id} item={item} />
-        )
-      )}
-    </div>
-  );
-}
-
-/* ---------- 分组卡片（子文件夹 → 标签页） ---------- */
-
-function GroupWidget({ folder, onOpenFolder, onManage, dragHandle }) {
-  const subs = folder.children.filter((c) => c.children);
-  const direct = folder.children.filter((c) => !c.children);
-  const [active, setActive] = useState("");
-  const items = active ? ((folder.children.find((c) => c.id === active) || {}).children || []) : direct;
-
-  return (
-    <div className="board-widget">
-      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
-        <h3 className="board-widget-title">{folder.title || "未命名"}</h3>
-        <div className="board-widget-actions">
-          <span className="board-widget-count">{folder.children.length} 项</span>
-          <button type="button" className="board-widget-action" title="管理分组" onClick={() => onManage(folder.id)}>
-            <MoreIcon className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      {subs.length > 0 && (
-        <div className="board-widget-tabs">
-          <button
-            type="button"
-            className={`board-widget-tab ${active === "" ? "active" : ""}`}
-            onClick={() => setActive("")}
-          >
-            全部
-          </button>
-          {subs.map((sub) => (
-            <button
-              key={sub.id}
-              type="button"
-              className={`board-widget-tab ${active === sub.id ? "active" : ""}`}
-              onClick={() => setActive(sub.id)}
-            >
-              {sub.title || "未命名"}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="board-widget-body">
-        <TileGrid items={items} onOpenFolder={onOpenFolder} />
-        {items.length === 0 && <div className="bt-empty">这个分组还没有书签</div>}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- 常用网站卡片 ---------- */
-
-function QuickSitesWidget({ sites, onManage, dragHandle }) {
-  return (
-    <div className="board-widget">
-      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
-        <h3 className="board-widget-title">常用网站</h3>
-        <div className="board-widget-actions">
-          <button type="button" className="board-widget-action" title="管理" onClick={onManage}>
-            <MoreIcon className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      <div className="board-widget-body">
-        <div className="bt-grid">
-          {sites.map((s) => (
-            <BookmarkTile key={s.id} item={s} />
-          ))}
-        </div>
-        {sites.length === 0 && <div className="bt-empty">常用网站为空，点 ⋯ 添加</div>}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- iframe 小部件 ---------- */
-
-function IframeWidget({ widget, onRemove, dragHandle }) {
-  const [reloadKey, setReloadKey] = useState(0);
-  return (
-    <div className="board-widget board-widget-iframe">
-      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
-        <h3 className="board-widget-title">{widget.title}</h3>
-        <div className="board-widget-actions">
-          <button type="button" className="board-widget-action" title="重新加载" onClick={() => setReloadKey((k) => k + 1)}>
-            <ReloadIcon className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            className="board-widget-action"
-            title="在新标签页打开"
-            onClick={() => { const u = safeUrl(widget.url); if (u) openUrl(u); }}
-          >
-            <OpenIcon className="w-4 h-4" />
-          </button>
-          <button type="button" className="board-widget-action board-widget-action-danger" title="删除小部件" onClick={() => onRemove(widget.id)}>
-            <TrashIcon className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      <div className="board-iframe-body">
-        <iframe
-          key={reloadKey}
-          src={safeUrl(widget.url) || "about:blank"}
-          className="board-iframe"
-          title={widget.title}
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
-      </div>
-      <div className="board-iframe-hint">若页面空白，说明该网站禁止内嵌，点右上角 ↗ 新窗口打开</div>
-    </div>
-  );
-}
-
-/* ---------- 管理面板（⋯） ---------- */
-
-function ManageSheet({ col, target, onClose }) {
-  // target: {type:"folder", id} | {type:"quicksites"}
-  const isQs = target.type === "quicksites";
-  const node = !isQs && col.data ? findNode(col.data, target.id)?.node : null;
-
-  const [nTitle, setNTitle] = useState("");
-  const [nUrl, setNUrl] = useState("");
-  const [editId, setEditId] = useState(null);
-  const [eTitle, setETitle] = useState("");
-  const [eUrl, setEUrl] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [renameDraft, setRenameDraft] = useState(node ? node.title : "");
-  const [confirmDel, setConfirmDel] = useState(false);
-
-  const items = isQs ? col.data?.quickSites || [] : node?.children || [];
-  const title = isQs ? "常用网站" : node ? node.title || "未命名" : "";
-
-  const submitAdd = () => {
-    const url = safeUrl(nUrl);
-    if (!url) return;
-    const t = nTitle.trim() || url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
-    if (isQs) col.addQuickSite({ title: t, url });
-    else col.addItem(target.id, { title: t, url });
-    setNTitle("");
-    setNUrl("");
-  };
-  const submitRename = () => {
-    if (renameDraft.trim()) col.renameNode(target.id, renameDraft.trim());
-    setRenaming(false);
-  };
-
-  return (
-    <div className="bf-overlay" onClick={onClose}>
-      <div className="bf-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="bf-header">
-          {renaming ? (
-            <input
-              className="bm-rename"
-              value={renameDraft}
-              autoFocus
-              onChange={(e) => setRenameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitRename();
-                if (e.key === "Escape") setRenaming(false);
-              }}
-            />
-          ) : (
-            <h3 className="bf-title">{title}</h3>
-          )}
-          <div className="bf-header-right">
-            {renaming ? (
-              <button type="button" className="bf-close" title="确认重命名" onClick={submitRename}>
-                <CheckIcon />
-              </button>
-            ) : (
-              !isQs && (
-                <button type="button" className="board-widget-action" title="重命名分组" onClick={() => setRenaming(true)}>
-                  <EditIcon className="w-4 h-4" />
-                </button>
-              )
-            )}
-            <button type="button" className="bf-close" onClick={onClose} title="关闭">
-              <CloseIcon />
-            </button>
-          </div>
-        </div>
-
-        <div className="bm-add">
-          <input className="bm-input" type="text" placeholder="标题（可选）" value={nTitle} onChange={(e) => setNTitle(e.target.value)} />
-          <input
-            className="bm-input"
-            type="text"
-            placeholder="网址 example.com（填了网址 + 收录 即保存）"
-            value={nUrl}
-            onChange={(e) => setNUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitAdd()}
-          />
-          <button type="button" className="bm-add-btn" disabled={!nUrl.trim()} onClick={submitAdd}>
-            ＋ 收录
-          </button>
-        </div>
-
-        <div className="bm-list">
-          {items.map((item, idx) =>
-            editId === item.id ? (
-              <div key={item.id} className="bm-row bm-row-edit">
-                <input className="bm-input" value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="标题" />
-                <input className="bm-input" value={eUrl} onChange={(e) => setEUrl(e.target.value)} placeholder="网址" />
-                <button
-                  type="button"
-                  className="bm-op"
-                  title="保存"
-                  onClick={() => {
-                    const url = safeUrl(eUrl);
-                    if (!url) return;
-                    if (isQs) col.updateQuickSite(item.id, { title: eTitle.trim() || url, url });
-                    else col.updateNode(item.id, { title: eTitle.trim() || url, url });
-                    setEditId(null);
-                  }}
-                >
-                  <CheckIcon />
-                </button>
-                <button type="button" className="bm-op" title="取消" onClick={() => setEditId(null)}>
-                  <CloseIcon />
-                </button>
-              </div>
-            ) : (
-              <div key={item.id} className="bm-row">
-                {item.children ? (
-                  <span className="bm-row-folder">🗂 {item.title || "未命名"}</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="bm-row-open"
-                    title="打开"
-                    onClick={() => { const u = safeUrl(item.url); if (u) openUrl(u); }}
-                  >
-                    {item.title || item.url}
-                  </button>
-                )}
-                <div className="bm-ops">
-                  <button
-                    type="button"
-                    className="bm-op"
-                    title="上移"
-                    disabled={idx === 0}
-                    onClick={() => col.moveNode(item.id, -1)}
-                  >
-                    <UpIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="bm-op"
-                    title="下移"
-                    disabled={idx === items.length - 1}
-                    onClick={() => col.moveNode(item.id, 1)}
-                  >
-                    <DownIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="bm-op"
-                    title="编辑"
-                    onClick={() => {
-                      setEditId(item.id);
-                      setETitle(item.title || "");
-                      setEUrl(item.url || "");
-                    }}
-                  >
-                    <EditIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="bm-op bm-op-danger"
-                    title={item.children ? "删除文件夹（含内容）" : "删除"}
-                    onClick={() => {
-                      if (isQs) col.removeQuickSite(item.id);
-                      else col.removeNode(item.id);
-                    }}
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            )
-          )}
-          {items.length === 0 && <div className="bt-empty">还没有内容，用上面的表单收录</div>}
-        </div>
-
-        {!isQs && (
-          <div className="bm-folder-ops">
-            {confirmDel ? (
-              <button
-                type="button"
-                id="bm-del-folder-confirm"
-                className="bm-del-folder confirming"
-                onClick={() => {
-                  col.removeNode(target.id);
-                  onClose();
-                }}
-              >
-                再点一次，确认删除整个分组
-              </button>
-            ) : (
-              <button type="button" className="bm-del-folder" onClick={() => setConfirmDel(true)}>
-                删除这个分组
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- 文件夹浏览浮层（子文件夹进入） ---------- */
-
-function FolderBrowser({ folderId, data, onClose }) {
-  const [pathIds, setPathIds] = useState([folderId]);
-
-  const nodeAt = (ids) => {
-    let children = data.folders || [];
-    let node = null;
-    for (const id of ids) {
-      node = children.find((c) => c.id === id) || null;
-      if (!node) return null;
-      children = node.children || [];
-    }
-    return node;
-  };
-
-  const current = nodeAt(pathIds);
-  if (!current) return null;
-  const trail = pathIds.map((id, idx) => ({ id, title: nodeAt(pathIds.slice(0, idx + 1))?.title || "未命名" }));
-
-  return (
-    <div className="bf-overlay" onClick={onClose}>
-      <div className="bf-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="bf-header">
-          <div className="bf-crumbs">
-            {trail.map((c, i) => (
-              <span key={c.id} className="bf-crumb-wrap">
-                {i > 0 && <span className="bf-crumb-sep">›</span>}
-                <button
-                  type="button"
-                  className={`bf-crumb ${i === trail.length - 1 ? "active" : ""}`}
-                  onClick={() => setPathIds(pathIds.slice(0, i + 1))}
-                >
-                  {c.title}
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="bf-header-right">
-            <span className="bf-count">{(current.children || []).length} 项</span>
-            <button type="button" className="bf-close" onClick={onClose} title="关闭">
-              <CloseIcon />
-            </button>
-          </div>
-        </div>
-        <div className="bf-body">
-          {(current.children || []).length > 0 ? (
-            <TileGrid
-              items={current.children || []}
-              onOpenFolder={(sub) => setPathIds(pathIds.concat(sub.id))}
-            />
-          ) : (
-            <div className="bt-empty">空文件夹</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- 可排序网格单元 + 拖拽浮层 ---------- */
-
-function DraggableCell({ def, style, children }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: def.id });
-  return (
-    <div
-      ref={setNodeRef}
-      data-id={def.id}
-      className={`board-cell ${isDragging ? "dragging-src" : ""}`}
-      style={style}
-    >
-      {children({ ref: setActivatorNodeRef, props: { ...attributes, ...listeners } })}
-      <span className="board-resize" title="拖动调整大小：横向改宽度，纵向改最小高度" />
-    </div>
-  );
-}
+import { safeUrl } from "../services/collection";
+import { colsForWidth, REF_SLOTS } from "../grid";
+import { GAP, defaultCardH, normalizeLayout, migrateV1Layout, visibleColumns, columnsToLayout } from "./board/layoutEngine";
+import { GroupWidget, QuickSitesWidget, IframeWidget } from "./board/widgets";
+import ManageSheet from "./board/ManageSheet";
+import FolderBrowser from "./board/FolderBrowser";
+import GateScreen from "./board/GateScreen";
 
 /*
- * 坐标模型：每张卡存显式位置 { x: 参考列, y: 行, w: 跨度, h: 最小行 }，指哪放哪、允许留白。
- * packColumns 仅用于两处：老数据（无 x/y）迁移补位、新建卡片的初始落位。
+ * 云端收藏看板（插件版与网页版共用这一个组件）—— v2 列式布局。
+ * - 卡片按列排布、每列等宽（CSS 流式：无绝对定位、无逐卡高度测量，渲染/拖拽天然流畅）
+ * - 列数：设置（2-5）或按宽度自适应；<640px 单列（拖拽停用，与移动端流式合一）
+ * - 拖拽：自研指针拖拽（纯几何：悬停列 = x 区间、插入位 = 卡片中点比较），
+ *   列内上下排序 + 跨列移动实时让位，松手一次回写云端 5 槽布局
+ * - 兼容旧格式布局（显式坐标数组），加载时自动迁移为列式
+ * - 登录门 / 管理面板 / 文件夹浏览在同目录 board/ 下；本文件只做列编排
  */
 
-function packColumns(items, cols, obstacles = []) {
-  // 本函数在「行」空间装箱（1 行 = LEGACY_ROW_PX 像素）。
-  // 障碍卡片的 y 与高度均为像素（高度含实测 heights），须先换算为行：
-  // 否则像素被当行用，新卡会叠到现有卡上、或被放到数万像素之外。
-  const colBottom = new Array(cols).fill(0);
-  for (const o of obstacles) {
-    const ospan = Math.max(1, Math.min(cols, o.w));
-    const ox = Math.max(0, Math.min(cols - ospan, o.x || 0));
-    const obottom = Math.max(2, Math.ceil(((o.y || 0) + Math.max(o.hPx || 0, o.h || 0)) / LEGACY_ROW_PX));
-    for (let x = ox; x < ox + ospan; x++) {
-      colBottom[x] = Math.max(colBottom[x], obottom);
-    }
-  }
-  const placed = [];
-  for (const it of items) {
-    const span = Math.max(1, Math.min(cols, it.w));
-    const rows = Math.max(2, Math.ceil((it.hPx || it.h || 0) / LEGACY_ROW_PX)); // 高度未知至少按 2 行估
-    let bestX = 0;
-    let bestY = Infinity;
-    for (let x = 0; x <= cols - span; x++) {
-      let b = 0;
-      for (let k = x; k < x + span; k++) b = Math.max(b, colBottom[k]);
-      if (b < bestY - 0.5) {
-        bestY = b;
-        bestX = x;
-      }
-    }
-    for (let k = bestX; k < bestX + span; k++) colBottom[k] = bestY + rows;
-    placed.push({ i: it.i, x: bestX, y: bestY, w: span, h: it.h });
-  }
-  return placed;
-}
-
-function viewSpan(it, cols) {
-  return Math.max(1, Math.min(cols, Math.round((it.w * cols) / REF_COLS)));
-}
-
-function viewX(it, cols) {
-  return Math.max(0, Math.min(cols - viewSpan(it, cols), Math.round((it.x * cols) / REF_COLS)));
-}
-
-function effHeightPx(it, heights) {
-  return Math.max(heights[it.i] || 0, it.h || 0);
-}
-
-/** 重力整理：纵向重叠或间距小于 GAP 的卡片，自动下推到恰好 GAP（14px），与左右间距一致 */
-function settleLayout(items, heights, cols, colW, pinnedId = null) {
-  const infos = items.map((it) => {
-    const span = viewSpan(it, cols);
-    const vx = viewX(it, cols);
-    const hPx = Math.max(effHeightPx(it, heights), it.h || 0);
-    return { ...it, vx, span, hPx };
-  });
-  infos.sort((a, b) => a.y - b.y || a.vx - b.vx);
-  for (let pass = 0; pass < 8; pass++) {
-    let moved = false;
-    for (let i = 0; i < infos.length; i++) {
-      const a = infos[i];
-      if (pinnedId && a.i === pinnedId) continue; // 被拉伸/拖动的卡片固定，由其他卡片让位
-      let y = a.y;
-      for (let j = 0; j < infos.length; j++) {
-        if (j === i) continue;
-        const o = infos[j];
-        const xOverlap = a.vx < o.vx + o.span && o.vx < a.vx + a.span;
-        if (!xOverlap) continue;
-        // o 在 a 上方且底边侵入 a 的顶部间隙 → 下推 a
-        if (o.y <= y && y < o.y + o.hPx + GAP) y = o.y + o.hPx + GAP;
-      }
-      if (y !== a.y) {
-        a.y = y;
-        moved = true;
-      }
-    }
-    if (!moved) break;
-  }
-  return infos.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
-}
-
-/** 拖放落点的防重叠：被占则逐行下移到首个空位 */
-function resolveDropY(candX, candY, span, draggedH, draggedId, items, heights, cols, colW) {
-  let y = Math.max(0, candY);
-  for (let guard = 0; guard < 60; guard++) {
-    const hit = items.find((o) => {
-      if (o.i === draggedId) return false;
-      const ovx = viewX(o, cols);
-      const ospan = viewSpan(o, cols);
-      const oh = effHeightPx(o, heights);
-      const oy = o.y;
-      const xOverlap = candX < ovx + ospan && ovx < candX + span;
-      const yOverlap = y < oy + oh && oy < y + draggedH;
-      return xOverlap && yOverlap;
-    });
-    if (!hit) break;
-    y = hit.y + effHeightPx(hit, heights) + GAP;
-  }
-  return y;
-}
+const DRAG_THRESHOLD = 6; // 按住标题栏移动超过该距离才进入拖拽（避免误伤点击）
 
 /* ---------- 看板入口 ---------- */
 
 export default function BookmarkBoard({ col }) {
   const { data, status, hasUid } = col;
-  const boardRef = useRef(null);
+  /* 回调 ref 持有容器元素：登录门/加载态与看板主渲染是不同 DOM 元素，元素替换时重挂观察器 */
+  const [boardEl, setBoardEl] = useState(null);
   const [width, setWidth] = useState(0);
   const [manage, setManage] = useState(null); // {type:"folder",id} | {type:"quicksites"}
   const [browsing, setBrowsing] = useState(null); // folderId
@@ -631,321 +39,187 @@ export default function BookmarkBoard({ col }) {
   const [newGroup, setNewGroup] = useState("");
   const [wTitle, setWTitle] = useState("");
   const [wUrl, setWUrl] = useState("");
-  const [gateMsg, setGateMsg] = useState(""); // 引导门提示（自动生成 ID 等）
 
-  /* 容器宽度（决定列数 10/6/4/2） */
-  useEffect(() => {
-    const el = boardRef.current;
-    if (!el) return;
+  useLayoutEffect(() => {
+    if (!boardEl) return;
+    const measure = () => setWidth(boardEl.getBoundingClientRect().width);
     const ro = new ResizeObserver((entries) => {
       for (const en of entries) setWidth(en.contentRect.width);
     });
-    ro.observe(el);
-    setWidth(el.getBoundingClientRect().width);
-    return () => ro.disconnect();
-  }, []);
+    ro.observe(boardEl);
+    measure();
+    // 兜底：个别内嵌 webview 会停发 RO 回调甚至 window resize，matchMedia 断点事件独立派发
+    window.addEventListener("resize", measure);
+    const mqs = [640, 760, 980, 1200].map((px) => {
+      const mq = window.matchMedia(`(min-width: ${px}px)`);
+      const handler = () => measure();
+      mq.addEventListener?.("change", handler);
+      return { mq, handler };
+    });
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      for (const { mq, handler } of mqs) mq.removeEventListener?.("change", handler);
+    };
+  }, [boardEl]);
 
   const folders = useMemo(() => (data ? data.folders || [] : []), [data]);
   const quickSites = useMemo(() => (data ? data.quickSites || [] : []), [data]);
   const iframeWidgets = useMemo(() => (data ? data.iframeWidgets || [] : []), [data]);
 
-  /* 网格内的卡片清单：常用网站 + 各分组 + iframe 小部件 */
+  /* 卡片显隐（云端 settings.hiddenCards） */
+  const hiddenCards = useMemo(() => {
+    const list = Array.isArray(data?.settings?.hiddenCards) ? data.settings.hiddenCards : [];
+    return new Set(list.filter((x) => typeof x === "string"));
+  }, [data?.settings?.hiddenCards]);
+
+  /* 网格内的卡片清单：常用网站 + 各分组 + iframe 小部件（按设置隐藏） */
   const widgetDefs = useMemo(() => {
-    const list = [{ id: "qs:quicksites", kind: "qs", title: "常用网站" }];
-    for (const f of folders) list.push({ id: "f:" + f.id, kind: "folder", folder: f, title: f.title || "未命名" });
-    for (const w of iframeWidgets) list.push({ id: "w:" + w.id, kind: "iframe", widget: w, title: w.title || "小部件" });
+    const list = hiddenCards.has("qs:quicksites") ? [] : [{ id: "qs:quicksites", kind: "qs", title: "常用网站" }];
+    for (const f of folders) {
+      if (!hiddenCards.has("f:" + f.id)) list.push({ id: "f:" + f.id, kind: "folder", folder: f, title: f.title || "未命名" });
+    }
+    for (const w of iframeWidgets) {
+      if (!hiddenCards.has("w:" + w.id)) list.push({ id: "w:" + w.id, kind: "iframe", widget: w, title: w.title || "小部件" });
+    }
     return list;
-  }, [folders, iframeWidgets]);
+  }, [folders, iframeWidgets, hiddenCards]);
   const defMap = useMemo(() => new Map(widgetDefs.map((d) => [d.id, d])), [widgetDefs]);
 
-  const cols = colsForWidth(width || 1280);
-  const colW = width ? (width - (cols - 1) * GAP) / cols : 0;
-  const [heights, setHeights] = useState({}); // 卡片实测内容高度（px）
+  /* 列数：设置优先（2-5），否则按宽度自适应；手机（<640px）一律单列 */
+  const colsSetting = Number(data?.settings?.cols);
+  const colCount = width > 0 && width < 640 ? 1 : colsSetting >= 2 && colsSetting <= 5 ? colsSetting : colsForWidth(width || 1280);
+  const dndEnabled = colCount > 1;
 
-  /* 布局：云端存「顺序 + 列跨度 w + 最小行数 h」；
-     w 以参考列数 10 计，h 以固定行高（像素）计，跨设备一致。
-     展示位置由装箱算法按顺序推算（自由堆叠，无空洞）；卡片高度 = 实测内容高度与 h 行取大 */
-  const derivedLayout = useMemo(() => {
-    const stored = Array.isArray(data?.layout) ? data.layout : [];
-    const wanted = new Map(widgetDefs.map((w) => [w.id, true]));
-    const known = [];
-    const needPlace = [];
-    const seen = new Set();
-    for (const e of stored) {
-      if (!wanted.has(e.i) || seen.has(e.i)) continue;
-      const w = Math.max(1, Math.min(REF_COLS, Math.round(e.w || defaultWidth(e.i))));
-      // 异常高度自愈（历史版本单位错乱可能写出超大值）
-      let h = Math.max(0, Math.round(e.h || 0));
-      const corrupted = h > 5000;
-      if (corrupted) h = e.i.startsWith("w:") ? 480 : 0;
-      if (Number.isFinite(e.x) && Number.isFinite(e.y) && !corrupted) {
-        known.push({ i: e.i, x: Math.max(0, Math.min(REF_COLS - w, Math.round(e.x))), y: Math.max(0, Math.round(e.y)), w, h });
-      } else {
-        needPlace.push({ i: e.i, w, h }); // 坐标缺失或已损坏：重新装箱
-      }
-      seen.add(e.i);
+  /* 云端布局 → 5 槽（旧格式坐标自动迁移） */
+  const layoutRaw = data?.layout;
+  const slots = useMemo(() => {
+    const known = new Set(widgetDefs.map((d) => d.id));
+    if (Array.isArray(layoutRaw) && layoutRaw.length && layoutRaw[0] && typeof layoutRaw[0].i === "string") {
+      return migrateV1Layout(layoutRaw, known);
     }
-    for (const wd of widgetDefs) {
-      if (!seen.has(wd.id)) needPlace.push({ i: wd.id, w: defaultWidth(wd.id), h: wd.id.startsWith("w:") ? 480 : 0 });
-    }
-    // 新卡片 / 旧格式数据：自动装箱补位（障碍高度用实测内容高度，避免叠卡/飞出屏幕）
-    if (needPlace.length) {
-      const obstacles = known.map((k) => ({ ...k, hPx: Math.max(effHeightPx(k, heights), k.h || 0) }));
-      for (const p of packColumns(needPlace, REF_COLS, obstacles)) known.push({ ...p, y: Math.round(p.y * LEGACY_ROW_PX) });
-    }
-    return known;
-  }, [data?.layout, widgetDefs, heights]);
+    return normalizeLayout(layoutRaw, known);
+  }, [layoutRaw, widgetDefs]);
 
-  /* 当前渲染/编辑中的布局（拖动与拉伸实时更新，结束后回写云端） */
-  const [items, setItems] = useState(derivedLayout);
-  const [gesturing, setGesturing] = useState(false);
-  const [activeId, setActiveId] = useState(null); // dnd-kit 正在拖动的卡片
-  const [overlayW, setOverlayW] = useState(280);
-  const itemsRef = useRef(items);
-  const gestureRef = useRef(null); // {id, it, startX, startY, cur, ...预览几何}（仅拉伸）
-  const gridRef = useRef(null);
-  const previewRef = useRef(null);
-  const candidateRef = useRef(null); // 拖动落点候选（vx 列, y 行）
-  const dragGeomRef = useRef(null); // 拖动抓取几何
-  const overlayRef = useRef(null);
-  const rafRef = useRef(0);
-  const activeIdRef = useRef(null);
+  /* 旧格式布局一次性迁移落库（按 5 列视图生成完整槽位） */
+  const migratedRef = useRef(false);
   useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-  useEffect(() => {
-    if (!gesturing && !activeId) setItems(derivedLayout);
-  }, [derivedLayout, gesturing, activeId]);
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  /* 每张卡的渲染几何：显式坐标 + 实测内容高度 */
-  const posMap = useMemo(() => {
-    const m = new Map();
-    for (const it of items) {
-      m.set(it.i, {
-        x: viewX(it, cols) * (colW + GAP),
-        y: it.y,
-        w: viewSpan(it, cols),
-        hPx: effHeightPx(it, heights),
-      });
+    if (!data || !hasUid || migratedRef.current) return;
+    if (Array.isArray(data.layout) && data.layout.length) {
+      migratedRef.current = true;
+      col.setLayout(columnsToLayout(visibleColumns(slots, REF_SLOTS)));
     }
-    return m;
-  }, [items, cols, colW, heights]);
+  }, [data, hasUid, slots, col]);
 
-  const containerHeight = useMemo(() => {
-    let m = 0;
-    for (const p of posMap.values()) m = Math.max(m, p.y + p.hPx);
-    return m;
-  }, [posMap]);
+  /* 拖拽：dropHint = {col, index}（实时让位），dragId = 正在拖的卡片 */
+  const [dropHint, setDropHint] = useState(null);
+  const [dragId, setDragId] = useState(null);
+  const [dragW, setDragW] = useState(0);
+  useEffect(() => { setDropHint(null); setDragId(null); }, [slots, colCount]);
+  const baseCols = useMemo(() => visibleColumns(slots, colCount), [slots, colCount]);
 
-  /* 渲染后实测卡片内容高度；变化则更新（拖放防重叠依赖它） */
-  useLayoutEffect(() => {
-    const gridEl = gridRef.current;
-    if (!gridEl) return;
-    const next = {};
-    let changed = false;
-    gridEl.querySelectorAll(".board-cell").forEach((el) => {
-      const id = el.dataset.id;
-      const h = el.offsetHeight;
-      next[id] = h;
-      if (Math.abs((heights[id] || 0) - h) > 1) changed = true;
-    });
-    if (changed) setHeights(next);
-  });
+  /* 悬停位 → 实时列（拖动卡搬到 hint 位置，其余卡自然让位） */
+  const activeCols = useMemo(() => {
+    if (!dropHint || !dragId) return baseCols;
+    const cols = baseCols.map((c) => c.filter((id) => id !== dragId));
+    const target = [...cols[dropHint.col]];
+    target.splice(Math.min(dropHint.index, target.length), 0, dragId);
+    cols[dropHint.col] = target;
+    return cols;
+  }, [baseCols, dropHint, dragId]);
 
-  /* 拉伸手势挂在网格容器上：按住右下角把手，横向调宽度、纵向调最小高度。
-     拖动排序交给 dnd-kit；按下时记录抓取几何，供拖动落点推算 */
-  const onGridPointerDown = useCallback(
+  /* ---------- 自研指针拖拽（纯几何，无命中检测库） ---------- */
+  const colsRef = useRef(null); // .board-cols 容器（几何基准）
+  const ghostRef = useRef(null); // 跟手浮层（直接改样式，零重渲染）
+  const dragRef = useRef(null); // {pending, id, def, startX, startY, grabDX, grabDY, cardW, raf, curX, curY}
+
+  const onBoardPointerDown = useCallback(
     (e) => {
-      if (gestureRef.current || e.button > 0) return;
-      const cellEl = e.target.closest(".board-cell");
-      if (!cellEl) return;
-      const gridEl = gridRef.current;
-      if (!gridEl) return;
-      // 记录抓取几何（拖动排序落点推算依据：指针相对卡片左上角的偏移 + 网格原点/列宽）
-      const gid = cellEl.dataset.id;
-      if (gid && itemsRef.current.some((p) => p.i === gid)) {
-        const gridRect = gridEl.getBoundingClientRect();
-        const cardRect = cellEl.getBoundingClientRect();
-        const colW2 = (gridRect.width - (cols - 1) * GAP) / cols;
-        dragGeomRef.current = {
-          gridLeft: gridRect.left,
-          gridTop: gridRect.top,
-          grabDX: e.clientX - cardRect.left,
-          grabDY: e.clientY - cardRect.top,
-          colW: colW2,
-          pitchX: colW2 + GAP,
-        };
-      }
-      if (!e.target.closest(".board-resize")) return;
-      const id = cellEl.dataset.id;
-      const it = itemsRef.current.find((p) => p.i === id);
-      if (!it) return;
-      e.preventDefault();
-      const gridRect = gridEl.getBoundingClientRect();
-      const cardRect = cellEl.getBoundingClientRect();
-      const ncols = colsForWidth(gridRect.width);
-      // 高度下限 = 真实内容高度（不含此前拉伸附加的最小高度），否则放大后永远缩不回去。
-      // body 是 flex 拉伸的，直接量子元素测不到自然高度，须临时清零 min-height 再量
-      let contentH = cardRect.height;
-      const prevMin = cellEl.style.minHeight;
-      cellEl.style.minHeight = "0";
-      contentH = cellEl.getBoundingClientRect().height;
-      cellEl.style.minHeight = prevMin;
-      gestureRef.current = {
-        id, it, startX: e.clientX, startY: e.clientY, cur: itemsRef.current,
-        gridW: gridRect.width,
-        cardLeft: cardRect.left - gridRect.left,
-        cardTop: cardRect.top - gridRect.top,
-        contentH,
-        colW: (gridRect.width - (ncols - 1) * GAP) / ncols,
+      if (!dndEnabled || e.button > 0 || dragRef.current) return;
+      const header = e.target.closest(".board-widget-header");
+      if (!header) return;
+      const card = header.closest(".board-card");
+      const container = colsRef.current;
+      if (!card || !container || !card.dataset.id) return;
+      const cardRect = card.getBoundingClientRect();
+      dragRef.current = {
+        pending: true,
+        id: card.dataset.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        grabDX: e.clientX - cardRect.left,
+        grabDY: e.clientY - cardRect.top,
+        cardW: cardRect.width,
+        curX: e.clientX,
+        curY: e.clientY,
       };
-      // 预览框初始 = 当前卡片尺寸
-      const pv = previewRef.current;
-      if (pv) {
-        pv.classList.add("active");
-        pv.style.left = cardRect.left - gridRect.left + "px";
-        pv.style.top = cardRect.top - gridRect.top + "px";
-        pv.style.width = cardRect.width + "px";
-        pv.style.height = cardRect.height + "px";
-        const badge = pv.querySelector(".board-resize-badge");
-        const span = Math.max(1, Math.min(ncols, Math.round((it.w * ncols) / REF_COLS)));
-        if (badge) badge.textContent = span + " 列";
-      }
-      setGesturing(true);
-      e.currentTarget.setPointerCapture(e.pointerId);
     },
-    [cols]
+    [dndEnabled]
   );
 
-  const onGridPointerMove = useCallback(
+  /* 悬停列与插入位：列 = x 落入的等宽区间；插入位 = 指针越过该列各卡中点的位置 */
+  const computeHint = useCallback((clientX, clientY) => {
+    const container = colsRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const pitch = rect.width / colCount;
+    const c = Math.max(0, Math.min(colCount - 1, Math.floor((clientX - rect.left) / pitch)));
+    const cards = container.querySelectorAll(`.board-col[data-col="${c}"] .board-card:not(.dragging-src)`);
+    let index = cards.length;
+    cards.forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) {
+        index = Math.min(index, i);
+      }
+    });
+    return { col: c, index };
+  }, [colCount]);
+
+  const onBoardPointerMove = useCallback(
     (e) => {
-      const g = gestureRef.current;
-      if (!g || rafRef.current) return;
-      const cx = e.clientX;
-      const cy = e.clientY;
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = 0;
-        const gg = gestureRef.current;
-        if (!gg) return;
-        const ncols = colsForWidth(gg.gridW);
-        const colW2 = (gg.gridW - (ncols - 1) * GAP) / ncols;
-        const pitchX2 = colW2 + GAP;
-        const vx0 = viewX(gg.it, ncols);
-        const span0 = viewSpan(gg.it, ncols);
-        // 拉伸可自由变宽/变高；松手时其他卡片自动下移让位
-        let span = Math.max(1, Math.min(ncols, Math.round(span0 + (cx - gg.startX) / pitchX2)));
-        const dw = Math.max(1, Math.round((span * REF_COLS) / ncols));
-        const dh = Math.max(0, Math.round(gg.it.h + (cy - gg.startY)));
-        gg.cur = gg.cur.map((p) => (p.i === gg.id ? { ...p, w: dw, h: dh } : p));
-        // 虚线预览框直接改样式（零重渲染），吸附列/行
-        const pv = previewRef.current;
-        if (pv) {
-          const w = span * gg.colW + (span - 1) * GAP;
-          const h = Math.max(gg.contentH, dh);
-          pv.style.width = w + "px";
-          pv.style.height = h + "px";
-          const badge = pv.querySelector(".board-resize-badge");
-          if (badge) badge.textContent = dh > 0 ? span + " 列 × " + dh + " 行" : span + " 列";
-        }
-      });
+      const d = dragRef.current;
+      if (!d) return;
+      d.curX = e.clientX;
+      d.curY = e.clientY;
+      if (d.pending) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
+        d.pending = false;
+        setDragW(d.cardW);
+        setDragId(d.id);
+      }
+      // 直接同步处理（不用 rAF：个别内嵌 webview 会停发 rAF 帧回调，拖拽会卡死在起始位）。
+      // 单次开销 = 一次样式写入 + 少量 getBoundingClientRect，且 hint 有相等性守卫，不会渲染风暴。
+      const g = ghostRef.current;
+      if (g) {
+        g.style.transform = `translate(${d.curX - d.grabDX}px, ${d.curY - d.grabDY}px)`;
+        g.style.visibility = "visible"; // 首帧定位后再显示，避免左上角闪现
+      }
+      const hint = computeHint(d.curX, d.curY);
+      if (hint) setDropHint((prev) => (prev && prev.col === hint.col && prev.index === hint.index ? prev : hint));
     },
-    [width]
+    [computeHint]
   );
 
-  const commitLayoutNow = useCallback(() => {
-    col.setLayout(itemsRef.current.map((p) => ({ i: p.i, x: p.x, y: p.y, w: p.w, h: p.h })));
-  }, [col]);
-
-  const onGridPointerUp = useCallback(
-    (e) => {
-      const g = gestureRef.current;
-      if (!g) return;
-      gestureRef.current = null;
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-      }
-      const pv = previewRef.current;
-      if (pv) pv.classList.remove("active");
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* 指针已释放时忽略 */
-      }
-      setGesturing(false);
-      // 一次性落位：重力整理后回写
-      const settled = settleLayout(g.cur, heights, cols, colW, g.id);
-      itemsRef.current = settled;
-      setItems(settled);
-      commitLayoutNow();
-    },
-    [commitLayoutNow, heights, cols, colW]
-  );
-
-  /* dnd-kit 拖动中：按「抓取偏移 + 指针位置」直接推算目标网格坐标（GridStack 模式），
-     虚线预览实时跟随；纯几何计算，不做 DOM 命中查询 */
-  const onDragMove = useCallback(
-    ({ activatorEvent, delta }) => {
-      const g = dragGeomRef.current;
-      const a = activeIdRef.current;
-      const dragged = itemsRef.current.find((p) => p.i === a);
-      const ae = activatorEvent;
-      if (!g || !a || !dragged || !ae || typeof ae.clientX !== "number") return;
-      const span = viewSpan(dragged, cols);
-      const draggedH = effHeightPx(dragged, heights);
-      const px = ae.clientX + delta.x;
-      const py = ae.clientY + delta.y;
-      const col = Math.max(0, Math.min(cols - span, Math.round((px - g.grabDX - g.gridLeft) / g.pitchX)));
-      const y = Math.max(0, Math.round(py - g.grabDY - g.gridTop));
-      const resolvedY = resolveDropY(col, y, span, draggedH, a, itemsRef.current, heights, cols, colW);
-      candidateRef.current = { vx: col, y: resolvedY };
-      // 跟手浮层：左上角 = 指针位置 - 抓取偏移
-      const ov = overlayRef.current;
-      if (ov) {
-        ov.style.left = px - g.grabDX + "px";
-        ov.style.top = py - g.grabDY + "px";
-      }
-      // 虚线落点预览（直接改样式，零重渲染）
-      const pv = previewRef.current;
-      if (pv) {
-        pv.classList.add("active");
-        pv.style.left = col * g.pitchX + "px";
-        pv.style.top = resolvedY + "px";
-        pv.style.width = span * g.colW + (span - 1) * GAP + "px";
-        pv.style.height = draggedH + "px";
-        const badge = pv.querySelector(".board-resize-badge");
-        if (badge) badge.textContent = "松开落到 " + (col + 1) + " 列";
-      }
-    },
-    [cols, heights, colW]
-  );
-
-  const onDragEnd = useCallback(() => {
-    const a = activeIdRef.current;
-    const cand = candidateRef.current;
-    activeIdRef.current = null;
-    candidateRef.current = null;
-    const pv = previewRef.current;
-    if (pv) pv.classList.remove("active");
-    setActiveId(null);
-    if (a && cand) {
-      const next = itemsRef.current.map((p) =>
-        p.i === a
-          ? {
-              ...p,
-              x: Math.max(0, Math.min(REF_COLS - p.w, Math.round((cand.vx * REF_COLS) / cols))),
-              y: cand.y,
-            }
-          : p
-      );
-      const settled = settleLayout(next, heights, cols, colW, a);
-      itemsRef.current = settled;
-      setItems(settled);
+  const onBoardPointerUp = useCallback(() => {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    if (dragId && dropHint) {
+      const cols = baseCols.map((c) => c.filter((id) => id !== dragId));
+      const target = [...cols[dropHint.col]];
+      target.splice(Math.min(dropHint.index, target.length), 0, dragId);
+      cols[dropHint.col] = target;
+      col.setLayout(columnsToLayout(cols));
     }
-    commitLayoutNow();
-  }, [cols, heights, colW, commitLayoutNow]);
+    setDragId(null);
+    setDropHint(null);
+  }, [dragId, dropHint, baseCols, col]);
+
+  const onBoardPointerCancel = onBoardPointerUp;
+
+  const openQsManage = useCallback(() => setManage({ type: "quicksites" }), []);
+  const openFolderManage = useCallback((id) => setManage({ type: "folder", id }), []);
+  const openFolderBrowser = useCallback((id) => setBrowsing(id), []);
 
   const submitNewGroup = () => {
     if (!newGroup.trim()) return;
@@ -963,115 +237,12 @@ export default function BookmarkBoard({ col }) {
   };
 
   /* 未登录：全屏引导门（登录 / 注册） */
-  if (!hasUid) {
-    let gatePrefill = "";
-    try { gatePrefill = sessionStorage.getItem("gatePrefillUid") || ""; } catch {}
-    const clearPrefill = () => { try { sessionStorage.removeItem("gatePrefillUid"); } catch {} };
-    const readForm = () => ({
-      id: (document.getElementById("gate-uid")?.value || "").trim(),
-      pw: document.getElementById("gate-pw")?.value || "",
-    });
-    const doLogin = async () => {
-      const { id, pw } = readForm();
-      if (!id || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
-      clearPrefill();
-      setGateMsg("正在登录…");
-      const r = await col.login(id, pw);
-      if (!r.ok) {
-        setGateMsg(
-          r.code === "bad-id"
-            ? `云端没有「${id}」这个 ID，点「新建用户」即可创建`
-            : r.code === "bad-password"
-              ? "密码错误，请重试"
-              : "网络异常，请稍后重试"
-        );
-      }
-    };
-    const doRegister = async () => {
-      const { id, pw } = readForm();
-      if (!id || !pw) { setGateMsg("请输入用户 ID 和密码"); return; }
-      if (pw.length < 6) { setGateMsg("密码至少 6 位"); return; }
-      clearPrefill();
-      setGateMsg("正在创建…");
-      const r = await col.register(id, pw);
-      if (!r.ok) {
-        setGateMsg(
-          r.code === "exists"
-            ? "该 ID 已被注册，请直接登录"
-            : r.code === "bad-id"
-              ? "ID 需 2-32 位（字母/数字/汉字/_/-）"
-              : "网络异常，请稍后重试"
-        );
-      }
-    };
-    return (
-      <div className="gate-screen" ref={boardRef}>
-        <div className="gate-deco" aria-hidden="true">
-          詩
-        </div>
-        <div className="gate-card">
-          <img src={`${import.meta.env.BASE_URL}icon/128.png`} alt="Poetry-Tab" className="gate-logo" />
-          <h1 className="gate-title">Poetry-Tab</h1>
-          <p className="gate-tagline">把古诗词和你的收藏，装进每一个新标签页</p>
-          <div className="gate-features">
-            <div className="gate-feature">
-              <PoemIcon className="gf-ico" />
-              <b>每日诗词</b>
-              <i>打开即见一首古诗词</i>
-            </div>
-            <div className="gate-feature">
-              <GridIcon className="gf-ico" />
-              <b>收藏看板</b>
-              <i>网站与小组件自由排布</i>
-            </div>
-            <div className="gate-feature">
-              <CloudSyncIcon className="gf-ico" />
-              <b>云同步</b>
-              <i>一个 ID 多端互通</i>
-            </div>
-          </div>
-          <div className="gate-form">
-            <input
-              id="gate-uid"
-              className="gate-input"
-              type="text"
-              placeholder="输入用户 ID"
-              spellCheck="false"
-              autoCapitalize="off"
-              autoComplete="off"
-              defaultValue={gatePrefill || undefined}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") document.getElementById("gate-pw")?.focus();
-              }}
-            />
-            <input
-              id="gate-pw"
-              className="gate-input"
-              type="password"
-              placeholder="密码（登录或设置，至少 6 位）"
-              autoComplete="new-password"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") doLogin();
-              }}
-            />
-            <button type="button" className="gate-btn primary" onClick={doLogin}>
-              登录
-            </button>
-            <button type="button" className="gate-btn ghost" onClick={doRegister}>
-              新建用户
-            </button>
-          </div>
-          {gateMsg && <div className="gate-msg">{gateMsg}</div>}
-          <p className="gate-hint">ID + 密码即账号，无需邮箱注册；同一账号在扩展与网页端共享</p>
-        </div>
-      </div>
-    );
-  }
+  if (!hasUid) return <GateScreen col={col} containerRef={setBoardEl} />;
 
   if (!data) {
     if (status === "boot" || status === "loading") {
       return (
-        <div className="bookmark-board" ref={boardRef}>
+        <div className="bookmark-board" ref={setBoardEl}>
           <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
             <div className="bf-header">
               <h3 className="bf-title">正在从云端加载…</h3>
@@ -1081,7 +252,7 @@ export default function BookmarkBoard({ col }) {
       );
     }
     return (
-      <div className="bookmark-board" ref={boardRef}>
+      <div className="bookmark-board" ref={setBoardEl}>
         <div className="board-widget" style={{ maxWidth: "420px", margin: "0 auto" }}>
           <div className="bf-header">
             <h3 className="bf-title">加载失败</h3>
@@ -1099,82 +270,76 @@ export default function BookmarkBoard({ col }) {
 
   const renderWidgetBody = (def, handle) => {
     if (def.kind === "qs")
-      return <QuickSitesWidget sites={quickSites} onManage={() => setManage({ type: "quicksites" })} dragHandle={handle} />;
+      return <QuickSitesWidget sites={quickSites} onManage={openQsManage} dragHandle={handle} />;
     if (def.kind === "folder")
       return (
         <GroupWidget
           folder={def.folder}
-          onOpenFolder={(id) => setBrowsing(id)}
-          onManage={(id) => setManage({ type: "folder", id })}
+          onOpenFolder={openFolderBrowser}
+          onManage={openFolderManage}
           dragHandle={handle}
         />
       );
-    return <IframeWidget widget={def.widget} onRemove={col.removeIframe} dragHandle={handle} />;
+    return <IframeWidget widget={def.widget} onRemove={col.removeIframe} onUpdate={col.updateIframe} dragHandle={handle} />;
   };
 
-  const overlayDef = activeId ? defMap.get(activeId) : null;
+  /* 空看板引导：没有任何内容时提示入口，建第一项后自动消失 */
+  const isEmptyBoard =
+    !quickSites.length && !iframeWidgets.length && (folders || []).every((f) => !(f.children || []).length);
 
   return (
-    <div className={`bookmark-board board-rgl ${gesturing ? "gesturing" : ""} ${activeId ? "dnd-active" : ""}`} ref={boardRef}>
-      <DndContext
-        sensors={sensors}
-        onDragStart={({ active, activatorEvent }) => {
-          const id = String(active.id);
-          activeIdRef.current = id;
-          setActiveId(id);
-          setOverlayW(active.rect.current.initial?.width || 280);
-          const g0 = dragGeomRef.current;
-          const ov = overlayRef.current;
-          if (g0 && ov && activatorEvent && typeof activatorEvent.clientX === "number") {
-            ov.style.left = activatorEvent.clientX - g0.grabDX + "px";
-            ov.style.top = activatorEvent.clientY - g0.grabDY + "px";
-          }
-        }}
-        onDragMove={onDragMove}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => {
-          activeIdRef.current = null;
-          candidateRef.current = null;
-          const pv = previewRef.current;
-          if (pv) pv.classList.remove("active");
-          setActiveId(null);
-        }}
-      >
-        <div
-          ref={gridRef}
-          className="board-grid"
-          style={{ height: containerHeight }}
-          onPointerDown={onGridPointerDown}
-          onPointerMove={onGridPointerMove}
-          onPointerUp={onGridPointerUp}
-          onPointerCancel={onGridPointerUp}
-        >
-          {items.map((it) => {
-            const def = defMap.get(it.i);
-            const p = posMap.get(it.i);
-            if (!def || !p) return null;
-            const minH = it.h > 0 ? `${it.h}px` : undefined;
-            return (
-              <DraggableCell
-                key={it.i}
-                def={def}
-                style={{
-                  width: p.w * colW + (p.w - 1) * GAP,
-                  minHeight: minH,
-                  transform: `translate(${p.x}px, ${p.y}px)`,
-                }}
-              >
-                {({ ref, props }) => renderWidgetBody(def, { ref, props })}
-              </DraggableCell>
-            );
-          })}
-          {/* 拉伸时的吸附虚线预览框 */}
-          <div ref={previewRef} className="board-resize-preview">
-            <span className="board-resize-badge" />
+    <div className={`bookmark-board board-rgl cols-${colCount}${dragId ? " dragging" : ""}`} ref={setBoardEl}>
+      {isEmptyBoard && (
+        <div className="board-onboarding">
+          <div className="board-onboarding-title">从收藏开始你的快捷开始页</div>
+          <div className="board-onboarding-text">
+            点右下角 <b>＋</b> 新建分组或添加小部件；已有浏览器书签可在 <b>设置 → 导入与备份</b> 一键导入
           </div>
         </div>
+      )}
 
-      </DndContext>
+      <div
+        ref={colsRef}
+        className="board-cols"
+        style={{ gap: GAP }}
+        onPointerDown={dndEnabled ? onBoardPointerDown : undefined}
+        onPointerMove={dndEnabled ? onBoardPointerMove : undefined}
+        onPointerUp={dndEnabled ? onBoardPointerUp : undefined}
+        onPointerCancel={dndEnabled ? onBoardPointerCancel : undefined}
+      >
+        {activeCols.map((ids, ci) => (
+          <div className={`board-col${ids.length === 0 ? " empty" : ""}`} key={ci} data-col={ci}>
+            {ids.map((id) => {
+              const def = defMap.get(id);
+              if (!def) return null;
+              return (
+                <div
+                  key={id}
+                  data-id={id}
+                  className={`board-card${id === dragId ? " dragging-src" : ""}`}
+                >
+                  <div
+                    className="board-card-inner"
+                    style={def.kind === "iframe" ? { minHeight: def.widget?.h || defaultCardH(id) } : undefined}
+                  >
+                    {renderWidgetBody(def, null)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* 拖拽跟手浮层（占位卡在原网格中以虚线呈现） */}
+      {dragId && (
+        <div ref={ghostRef} className="board-drag-ghost" style={{ width: dragW || undefined, visibility: "hidden" }}>
+          <div className="board-widget-header">
+            <h3 className="board-widget-title">{defMap.get(dragId)?.title || ""}</h3>
+            <span className="board-widget-count">拖动中…</span>
+          </div>
+        </div>
+      )}
 
       {/* 右下角悬浮按钮（不占网格） */}
       <div className="board-fab-zone">
@@ -1201,20 +366,6 @@ export default function BookmarkBoard({ col }) {
           <AddIcon className="w-7 h-7" />
         </button>
       </div>
-
-      {/* 拖动跟手浮层 */}
-      {overlayDef && (
-        <div
-          ref={overlayRef}
-          className="board-widget board-overlay"
-          style={{ width: overlayW }}
-        >
-          <div className="board-widget-header">
-            <h3 className="board-widget-title">{overlayDef.title}</h3>
-            <span className="board-widget-count">拖动中…</span>
-          </div>
-        </div>
-      )}
 
       {modal === "group" && (
         <div className="bf-overlay" onClick={() => setModal(null)}>
@@ -1243,7 +394,7 @@ export default function BookmarkBoard({ col }) {
               </button>
             </div>
             <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
-              新分组卡片出现在网格底部，可拖动、可拉伸
+              新分组卡片出现在末列，可列内排序、跨列拖动
             </div>
           </div>
         </div>
@@ -1275,7 +426,7 @@ export default function BookmarkBoard({ col }) {
               </button>
             </div>
             <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
-              添加后出现在网格底部；部分网站禁止内嵌会显示空白，可用卡片右上角 ↗ 打开
+              添加后出现在末列；部分网站禁止内嵌会显示空白，可用卡片右上角 ⋯ 打开
             </div>
           </div>
         </div>

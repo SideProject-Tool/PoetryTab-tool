@@ -8,6 +8,9 @@ export const SETTINGS_DEFAULTS = {
   theme: "sync",
   engine: "baidu",
   cats: ["i"],
+  cols: "auto", // 看板列数：auto（按宽度 5/4/3/2）或 2-5；<640px 一律单列
+  showSearch: false,
+  hiddenCards: [],
 };
 
 function uid(prefix) {

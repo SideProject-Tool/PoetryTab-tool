@@ -1,7 +1,8 @@
 # Poetry-Tab 商店发布材料与操作指南
 
 本文档包含上架 Chrome Web Store 与 Edge Add-ons 所需的全部材料与步骤。
-发布包与素材均已就绪，见仓库 `store/` 目录。
+
+> 发版完整流程（版本号 → 验证 → 部署 → 打商店包）见根目录 `AGENTS.md`「发版与商店提交」。
 
 ---
 
@@ -9,10 +10,12 @@
 
 | 文件 | 用途 |
 |---|---|
-| `poetrytab-tool-chrome.zip`（Downloads 目录，3.0MB） | Chrome Web Store 与 Edge Add-ons 共用的上传包（MV3，manifest v1.0.0） |
-| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（至少 1 张，1280×800） |
-| `store/screenshot-edge-1080x680.png` | Edge 商店截图（至少 1 张，1080×680） |
+| `.output/poetrytab-tool-<版本>-chrome.zip`（由 `STORE_BUILD=1 pnpm zip` 生成，约 3.3MB） | Chrome Web Store 与 Edge Add-ons 共用上传包（MV3，无 key） |
+| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（1280×800）⚠️ 提交前与当前界面核对，不符则重截 |
+| `store/screenshot-edge-1080x680.png` | Edge 商店截图（1080×680）⚠️ 同上 |
 | `store/logo-edge-300x300.png` | Edge 商店 Logo（300×300） |
+
+提交前抽查 zip 内 manifest：**无 `key` 字段**、版本正确、`permissions: ["bookmarks"]`、host 权限仅 `https://sync.pathmemos.com/*`。
 
 隐私政策页面（两家商店都必填）：**https://sync.pathmemos.com/privacy.html**
 
@@ -26,26 +29,22 @@
 - 建议同时完成「账号验证」（邮箱 + 电话），可增加可发布项数量上限
 
 ### 2. 上传与填写
-1. 开发者中心 →「新增项」→ 上传 `poetrytab-tool-chrome.zip`
-2. 「商店呈现」页填写（可直接复制下方文案）：
+1. 开发者中心 →「新增项」→ 上传 zip 包
+2. 「商店呈现」页填写（文案见下方）：
    - **名称**：`Poetry-Tab`（自动读自 manifest）
-   - **简短说明**（≤132 字符）：见下方「简短说明」
-   - **详细说明**：见下方「详细说明」
-   - **类别**：生产工具（Productivity）
-   - **语言**：中文（简体）
-   - **图标**：`public/icon/128.png`
-   - **截图**：上传 `store/screenshot-chrome-1280x800.png`
-3. 「隐私权」页（必填）：
+   - **类别**：生产工具（Productivity）；**语言**：中文（简体）
+   - **图标**：`public/icon/128.png`；**截图**：1280×800
+3. 「隐私权」页（必填；扩展含 bookmarks 权限，说明必须对应）：
    - 单一用途说明：`在新标签页展示古诗词，并提供用户自主创建的收藏看板与云同步`
-   - 权限用途：`标签页权限仅用于打开书签网址；host 权限仅用于访问自身的云同步服务 sync.pathmemos.com`
+   - **权限用途**：`bookmarks 权限仅用于「导入浏览器书签」功能——在用户主动点击导入时读取浏览器书签树并导入用户的收藏看板，不做任何其他访问；host 权限仅用于访问自身的云同步服务 sync.pathmemos.com`
    - 「此项目处理用户数据」→ 是 → 勾选：提供用户数据的服务器端处理；数据不转移、不用于广告、不出售
    - 隐私政策网址：`https://sync.pathmemos.com/privacy.html`
 4. 「分发」页：公开 / 按区域自行选择；免费
-5. 提交审核（首次审核通常 1-3 个工作日，含远程代码/权限审查可能更久）
+5. 提交审核（首次 1-3 个工作日；**新增权限会触发更严格审核**，可能更久）
 
-### 简短说明（复制用）
+### 简短说明（≤132 字符，复制用）
 ```
-新标签页上的古诗词与收藏看板：每日一首中国诗词，书签分组、iframe 小部件、多端云同步。
+新标签页上的古诗词与收藏看板：每日诗词、拼音搜索、书签一键导入、iframe 小部件、多端云同步。
 ```
 
 ### 详细说明（复制用）
@@ -53,19 +52,22 @@
 Poetry-Tab 把古诗词和你的收藏，装进每一个新标签页。
 
 📜 每日诗词
-打开新标签页即见一首中国古诗词，覆盖诗词、文学、哲学、影视等 12 个分类，点击即可换一首，一键查询出处。
+打开新标签页即见一首中国古诗词，覆盖诗词、文学、哲学、影视等 12 个分类，点击换一首，一键查询出处。
 
 🗂 收藏看板
-类 Trello 的自由网格看板：分组管理书签与常用网站，卡片可拖动排序、自由拉伸，间距对齐，内容完整展开。支持 iframe 小部件，把任意网站直接嵌入新标签页。
+列式看板：卡片拖动即可列内排序、跨列移动；分组支持二级子分组（标签页展示）；常用网站一卡直达；iframe 小部件把任意网站嵌入新标签页（高度四档可调）。
+
+📥 一键导入与批量收录
+导入浏览器书签（自动去重）；管理面板多行批量录入；标题留空自动获取网页名称。
+
+🔍 搜索
+搜索自己的收藏，支持拼音与首字母（weibo → 新浪微博）；按 1-9 数字键直达常用网站。
 
 ☁️ 云同步
-一个用户 ID 走天下：浏览器扩展与网页版（sync.pathmemos.com）共享同一份收藏，修改自动保存到云端，保留 5 个历史版本。
+一个用户 ID 走天下：浏览器扩展与网页版（sync.pathmemos.com）共享同一份收藏，自动保存、5 份历史快照可恢复、JSON 备份导出。误删 6 秒内可撤销。
 
-✨ 其他特性
-- 深色 / 浅色 / 跟随系统主题
-- 搜索收藏与搜索引擎直达（百度 / Google / Bing / DuckDuckGo）
-- 12 个诗词分类自由组合
-- 隐私优先：无广告、无追踪，数据存放在你自己的云端空间
+✨ 其他
+深色 / 浅色 / 跟随系统主题；百度 / Google / Bing / DuckDuckGo；无广告、无追踪，数据存放在你自己的云端空间。
 
 官网与网页版：https://sync.pathmemos.com
 ```
@@ -74,37 +76,24 @@ Poetry-Tab 把古诗词和你的收藏，装进每一个新标签页。
 
 ## 二、Edge Add-ons（微软商店）
 
-### 1. 注册账号（需要你操作）
-- 访问 https://partner.microsoft.com/dashboard/microsoftedge
-- 用 Microsoft 账号登录，完成 Partner Center 注册（免费）
-- 选择「个人」或「公司」账户类型均可
-
-### 2. 上传与填写
-1. Partner Center → Edge 计划 →「创建新扩展」
-2. 上传同一个 `poetrytab-tool-chrome.zip`（Edge 兼容 Chrome MV3 包，无需改代码）
-3. 填写（复制下方内容）：
-   - **显示名称**：`Poetry-Tab`
-   - **简短说明** / **描述**：同 Chrome 文案
-   - **类别**：生产工具
-   - **商店 Logo**：`store/logo-edge-300x300.png`（300×300）
-   - **截图**：上传 `store/screenshot-edge-1080x680.png`
-   - **隐私政策 URL**：`https://sync.pathmemos.com/privacy.html`
-   - **网站 URL**：`https://sync.pathmemos.com`
+1. 访问 https://partner.microsoft.com/dashboard/microsoftedge，用 Microsoft 账号完成 Partner Center 注册（免费）
+2. Edge 计划 →「创建新扩展」→ 上传同一个 zip（Edge 兼容 Chrome MV3 包）
+3. 填写：显示名称 `Poetry-Tab`；简短说明/描述同 Chrome 文案；类别生产工具；Logo 用 `store/logo-edge-300x300.png`；截图 1080×680；隐私政策 URL 与网站 URL 均填 sync.pathmemos.com
 4. 提交审核（通常 1-7 个工作日）
 
 ---
 
 ## 三、发布前自查清单
 
-- [x] ZIP 包内 manifest.json 位于根目录，版本 1.0.0
-- [x] 图标 16-256px 全套（新 Logo）
-- [x] 无后台脚本、权限最小化（无额外 API 权限）
-- [x] 隐私政策页已上线
-- [x] 截图与 Logo 素材就绪
-- [x] 本地加载验证通过（E2E 14 步）
+- [ ] `package.json` 版本已提升且大于商店在售版本
+- [ ] `node scripts/test-worker.mjs` 全绿；`pnpm build && pnpm build:web` 通过；双端手工回归
+- [ ] `STORE_BUILD=1 pnpm zip` 生成的包解包抽查：无 key、版本正确、permissions 符合预期
+- [ ] 隐私权页权限说明与实际权限一致（bookmarks / host）
+- [ ] 截图为当前版本界面（列式看板上线后需重截 1280×800 / 1080×680）
+- [ ] 隐私政策页已上线且内容与当前数据处理一致
 
 ## 四、需要你完成的认证/操作
 
-1. **Chrome**：Google 账号 + 5 美元注册费（信用卡）；上传可在网页完成，无需给我授权
+1. **Chrome**：Google 账号 + 5 美元注册费（信用卡）；网页上传即可
 2. **Edge**：Microsoft 账号注册 Partner Center；网页上传即可
-3. 若希望我通过 API 直接代为上传（Chrome Web Store API），需要你在 Google Cloud 创建 OAuth 客户端并提供刷新令牌；Edge 的 API 需要 Azure AD 应用配置——两种手动网页上传都更简单，推荐手动
+3. 代上传（Chrome Web Store API / Edge API）需要另行配置 OAuth，手动网页上传更简单，不推荐

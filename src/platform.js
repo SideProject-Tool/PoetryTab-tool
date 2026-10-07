@@ -17,3 +17,28 @@ export function openUrl(url, { newTab = true } = {}) {
     window.location.href = url;
   }
 }
+
+/**
+ * 浏览器书签树（仅扩展端，需 manifest 的 bookmarks 权限）。
+ * 返回 [{title, children:[{title,url}|子文件夹]}]；网页端或不支持时返回 null。
+ * chrome.bookmarks 的根节点（"root"）与"移动设备书签"空树一并剔除。
+ */
+export async function getBrowserBookmarks() {
+  if (!IS_EXT || !globalThis.chrome?.bookmarks?.getTree) return null;
+  const tree = await new Promise((resolve, reject) => {
+    globalThis.chrome.bookmarks.getTree((res) =>
+      chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve(res)
+    );
+  });
+  const mapChildren = (nodes) =>
+    (nodes || [])
+      .filter((n) => n.id !== "0") // 0 是虚拟根
+      .map((n) =>
+        n.url
+          ? { title: n.title || n.url, url: n.url }
+          : { title: n.title || "未命名文件夹", children: mapChildren(n.children) }
+      )
+      .filter((n) => n.url || (n.children && n.children.length));
+  const roots = tree[0]?.children || [];
+  return mapChildren(roots);
+}

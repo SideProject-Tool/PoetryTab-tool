@@ -32,37 +32,41 @@
 
 ### 🔍 智能搜索框
 - **搜索自己的收藏**：输入即匹配分组/书签/常用网站，显示所在路径
+- **拼音与首字母**：`weibo` 命中「新浪微博」、`blbl` 命中「哔哩哔哩」（pinyin-pro 按需加载）
 - **搜索引擎直达**：百度 / Google / Bing / DuckDuckGo 随设置切换
-- 搜索框默认隐藏：右上角 🔍 按钮、快捷键 `S` 呼出，`Esc` 关闭
+- 默认隐藏给诗词留白：`S` 呼出、`Esc` 收起；设置 → 外观可开启「搜索栏常驻」（随账号同步）
+- **数字键直达**：按 `1-9` 直接打开常用网站前 9 个
 
 ### 🗂 收藏看板（核心）
 <p align="center">
   <img src="preview/board.png" alt="收藏看板" width="640" />
 </p>
 
-- **常用网站**：高频站点单独一张卡片
-- **分组书签**：自建分组，卡片内书签磁贴铺开完整可见；子分组自动变卡片标签页
-- **iframe 小部件**：把任意网站直接内嵌进新标签页（监控面板、文档站、日历……）
-- **网格布局，手感一流**：
-  - 按住卡片标题**拖动排序**——跟手浮层 + 其余卡片平滑让位（dnd-kit）
-  - 右下角把手**自由拉伸**——虚线吸附预览框 + 实时尺寸徽标（如「4 列 × 2 行」），松手一次落位
-  - 卡片内容**永远完整展开**，拉伸只改变下限，绝不在卡片里藏滚动条
-  - 列数随窗口宽度自适应 **10 / 6 / 4 / 2** 列，手机上也不错
+- **常用网站**：高频站点单独一张卡片（favicon 经同步服务代理，国内可达）
+- **分组书签**：自建分组，卡片内书签磁贴铺开完整可见；**支持二级子分组**（卡片内标签页展示，管理面板可创建/进入）；**批量收录**（多行文本一行一条）；**名称留空自动取网页标题**（服务端代理）
+- **iframe 小部件**：把任意网站直接内嵌进新标签页（监控面板、文档站、日历……）；视口内才加载、会话内不重载，操作收进 ⋯ 菜单（含**高度档位** 240/420/600/800，随账号同步）
+- **一键导入浏览器书签**：扩展端直接读浏览器书签树；网页版导入导出的书签 HTML（重复网址自动跳过）
+- **误删无忧**：删除书签/分组/小部件后 6 秒内可一键撤销
+- **列式看板，顺滑流畅**：
+  - 卡片按列排布、每列等宽；列数可设（自动 5/4/3/2 或固定 2-5，随账号同步），手机自动单列满宽
+  - 按住卡片标题**拖动**——列内上下排序、跨列移动，其余卡片实时让位（纯 CSS 流式布局，无逐卡测量，天然流畅）
+  - 视口外的卡片自动跳过渲染（content-visibility），上百卡片也流畅
 - **右下角悬浮按钮（FAB）**：新建分组 / 添加 iframe 小部件，不占网格
 
 ### ☁️ 云同步
 - 一套**用户 ID** 走天下：同一 ID 在浏览器扩展、任何设备的网页上打开，都是同一份收藏
-- 修改 **700ms 防抖自动保存**；设置面板亦可手动「上传到云端 / 从云端恢复」
-- 服务端保留 **5 个历史版本快照**，误删可回滚
-- 支持本地缓存离线渲染，弱网/断网先看缓存再同步
+- 修改 **700ms 防抖自动保存**；同浏览器多标签页经 BroadcastChannel 即时互通
+- **多设备冲突强制仲裁**：云端被他设备更新且本地有未同步修改时，暂停自动保存，由你在「上传到云端（本地为准）/ 从云端恢复（云端为准）」中明确选择，绝不静默覆盖
+- 服务端保留 **5 个历史版本快照**，设置面板可查看并一键恢复（恢复动作本身也留快照，可再撤销）
+- 支持**导出 / 恢复 JSON 备份**；本地缓存离线渲染，弱网/断网先看缓存再同步，GET 带 ETag 未变化零流量
 
 ### ⚙️ 设置
-| 设置项 | 说明 |
+设置面板为居中弹窗，分三个标签页：
+| 标签页 | 内容 |
 |---|---|
-| 主题 | 浅色 / 深色 / 跟随系统（入口：右上角 ⚙） |
-| 搜索引擎 | 百度 / Google / Bing / DuckDuckGo |
-| 展示类别 | 12 个诗词分类任意组合（至少一个） |
-| 云同步 | 用户 ID + 密码登录、上传到云端、从云端恢复 |
+| 外观 | 主题（浅色/深色/跟随系统）、搜索引擎、搜索栏常驻、展示类别、**卡片显隐** |
+| 云同步 | 用户 ID + 密码登录、上传到云端、从云端恢复、退出登录 |
+| 导入与备份 | 导入浏览器书签 / 书签 HTML、导出 / 恢复 JSON 备份、历史版本快照恢复 |
 
 ---
 
@@ -136,21 +140,26 @@
 - `pt/data/<uid>/snap-<ts>-<seq>.json` —— 历史快照（保留最近 5 份）
 
 **账号与会话**（密码永不明文传输/存储）：
-- 注册：客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k 迭代) 得 authKey 提交，服务端只存派生结果
-- 登录：`POST /api/challenge` 领取带签名的一次性挑战（附盐与迭代次数）→ 客户端重派生 authKey，以 HMAC-SHA256(authKey, challenge) 应答
+- 注册：客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k 迭代) 得 authKey 提交，服务端只存派生结果（R2 条件写保证并发同名注册不互相覆盖）
+- 登录：`POST /api/challenge` 领取带签名的一次性挑战（附盐与迭代次数）→ 客户端重派生 authKey，以 HMAC-SHA256(authKey, challenge) 应答；**不存在的 ID 返回确定性伪盐**（响应形状一致，防账号枚举），登录失败统一提示「ID 或密码不匹配」
 - 会话：登录成功发放无状态令牌 `uid|exp|HMAC(SYNC_TOKEN, uid|exp)`，30 天有效；此后数据读写仅凭令牌（`Authorization: Bearer`），uid 从令牌解析，杜绝越权
 
 **API**（`/api/register`、`/api/challenge`、`/api/login` 无需令牌但有 per-IP 限流；其余需会话令牌）：
 - `POST /api/register` `{uid, salt, authKey, iter}` → `{session}`
 - `POST /api/challenge` `{uid}` → `{challenge, salt, iter}`
 - `POST /api/login` `{uid, challenge, proof}` → `{session, savedAt, data}`
-- `GET /api/data` → `{savedAt, data}`
-- `PUT /api/data` 整体写入（≤8MB），携带 `X-Base-SavedAt` 乐观锁：与云端当前 `savedAt` 不一致返回 409；成功后自动轮转快照
+- `GET /api/data` → `{savedAt, data}`；携带 `If-None-Match`（上次 savedAt）命中返回 **304**，开新标签页零流量
+- `PUT /api/data` 整体写入（≤8MB），携带 `X-Base-SavedAt` 乐观锁：服务端以 **R2 条件写（onlyIf etag）原子完成「校验+写入」**，并发写只成功一个，其余 409；成功后自动轮转快照
+- `GET /api/snaps` → `{snaps: [{key, at}]}`（最近 5 份快照）
+- `POST /api/snap/restore` `{key}` → 恢复该快照为当前数据（恢复动作也留快照）
+- `GET /api/favicon?domain=` → favicon 代理（R2 缓存 30 天，Google s2 → DuckDuckGo 兜底）
+- CORS 白名单含 `X-Base-SavedAt` / `If-None-Match`，本地开发与跨源环境可用完整 API
 
-**数据格式**（`pt/data/<uid>.json` 的 `data` 字段）：
+**数据格式**（`pt/data/<uid>.json` 的 `data` 字段，`v` 为 schema 版本号）：
 
 ```jsonc
 {
+  "v": 1,                          // schema 版本（结构迁移用）
   "folders": [                      // 分组（顶层卡片）
     {
       "id": "f_xxx",
@@ -163,25 +172,24 @@
   "quickSites": [                   // 常用网站卡片
     { "id": "qs_xxx", "title": "GitHub", "url": "https://github.com", "favicon": "" }
   ],
-  "iframeWidgets": [                // iframe 内嵌小部件卡片
-    { "id": "iw_xxx", "title": "example", "url": "https://example.com" }
+  "iframeWidgets": [                // iframe 内嵌小部件卡片（h = 卡片高度，⋯ 菜单可调，云端同步）
+    { "id": "iw_xxx", "title": "example", "url": "https://example.com", "h": 420 }
   ],
   "settings": {                     // 同步的设置
     "theme": "sync",                // sync | light | dark
     "engine": "baidu",              // baidu | google | bing | duckduckgo
     "cats": ["i"]                   // 启用的诗词分类
   },
-  "layout": [                       // 看板布局：显式坐标
-    { "i": "qs:quicksites", "x": 0, "y": 0, "w": 2, "h": 0 },
-    { "i": "f:f_xxx",       "x": 2, "y": 0, "w": 2, "h": 0 }
-    // i  = 卡片标识（qs:常用网站 / f:分组 / w:iframe）
-    // x/w = 列位置/跨度（以「参考 10 列」为坐标系存储，渲染时按实际列数 10/6/4/2 等比换算）
-    // y/h = 像素（y 纵向位置；h 最小高度，0 表示不设下限；内容永远完整展开）
-  ]
+  "layout": {                       // 看板布局（v2 列式）：固定 5 槽位，各槽为卡片 id 的有序数组
+    "v": 2,
+    "cols": [["qs:quicksites", "f:f_xxx"], ["w:iw_xxx"], [], [], []]
+    // 设备按自身列数（设置 2-5 或自动 5/4/3/2）取前 N 列，溢出槽位并入末列；
+    // 手机（<640px）单列按「列序 × 列内序」排列；旧版 v1 显式坐标加载时自动迁移
+  }
 }
 ```
 
-> 已知限制：并发 PUT 的「读版本→比对→写入」在服务端非原子（未用 R2 条件写），极端并发下可能后写覆盖先写；常规多端使用由 `X-Base-SavedAt` 乐观锁 + 客户端冲突提示兜底。
+> 并发 PUT 由服务端 R2 条件写原子仲裁：同版本只有一次写入成功，后到者收 409 进入客户端仲裁流程（本地未修改自动载入云端；有修改则明确二选一）。
 
 ---
 
@@ -201,19 +209,23 @@ pnpm zip            # 打包扩展 zip
 ├── entrypoints/newtab/     # 扩展新标签页入口（WXT）
 ├── src/pages/newtab/       # 双端共享的 React 应用（核心代码）
 │   ├── App.jsx             # 页面组装：诗词 → 搜索 → 看板 → 设置
-│   ├── components/         # BookmarkBoard / BookmarkSearch / SettingsPanel
+│   ├── components/         # BookmarkBoard（看板编排）/ BookmarkSearch / SettingsPanel
+│   │   └── board/          # 看板子模块：layoutEngine / widgets / ManageSheet / FolderBrowser / GateScreen
 │   ├── hooks/              # useCollection（云数据层）/ useContentEngine（诗词引擎）
-│   ├── services/           # collection（数据契约）/ contentEngine（诗词源）
-│   └── grid.js             # 网格坐标系工具
+│   ├── services/           # collection（数据契约）/ contentEngine（诗词源）/ bookmarks（书签导入）/ meta（标题代理）
+│   └── grid.js             # 列数常量与自适应
+├── worker/src/worker.js    # 同步 API（部署源）
 ├── web/                    # 网页版入口
 ├── vite.web.config.mjs     # 网页版构建配置
 ├── assets/fonts/           # 江西拙楷字体
-└── preview/                # 文档截图
+├── docs/                   # 业务文档（产品手册 / 同步与数据 / 架构 / 商店上架）
+└── preview/                # README 截图
 ```
 
-**E2E 测试**（Playwright，位于 `../ext-test/`）：
-- `test-rgl.cjs` — 看板全流程回归（14 步：登录/建分组/收录/小部件/拖动/拉伸/云端布局/双端一致/手机视口）
-- 云端断言直接读取 `GET /api/data`（需会话令牌）比对
+**测试**：
+- Worker 本地自测（无需部署，R2 内存模拟）：`node scripts/test-worker.mjs` —— 注册/防枚举/ETag/CAS/快照恢复/favicon/title/CORS 全量断言
+- 线上协议冒烟：`node scripts/test-auth.mjs`
+- E2E 自动化暂缺；浏览器手工回归要点见 AGENTS.md「改动后验证」
 
 ---
 

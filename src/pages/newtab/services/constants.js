@@ -1,6 +1,5 @@
-export const LIGHT_THEME = "cupcake";
-// export const DARK_THEME = "luxury"
-export const DARK_THEME = "halloween";
+/** 主题名映射（daisyUI）：settings.theme 的 light/dark/sync → data-theme */
+export const THEME_NAMES = { light: "cupcake", dark: "halloween" };
 
 export const FONTNAME_LIST = [
   // 江西拙楷（手写楷体，含应用全量字符子集）
