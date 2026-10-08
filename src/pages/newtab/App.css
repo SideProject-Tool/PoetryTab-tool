@@ -185,109 +185,151 @@
   border-bottom-color: var(--color-primary);
 }
 
+/* 内容区两侧留白：所有设置项与弹窗边缘保持舒适间距 */
 .settings-modal-body {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0.6rem 0.5rem 0.8rem;
+  padding: 0.9rem 1.3rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-}
-
-.settings-modal .settings-row,
-.settings-modal .settings-cats,
-.settings-modal .settings-snaps,
-.settings-modal .settings-conflict-tip,
-.settings-modal .settings-cards {
-  margin-left: 0.6rem;
-  margin-right: 0.6rem;
+  gap: 0.35rem;
 }
 
 .settings-modal .settings-sync-msg {
-  margin: 0.4rem 1.1rem 0.9rem;
+  margin: 0.4rem 0 0.9rem;
 }
 
 .settings-modal .settings-sync-hint {
-  padding: 0.4rem 0.6rem 0.2rem;
+  padding: 0.4rem 0 0.2rem;
 }
 
-/* 开关（搜索栏常驻 / 卡片显隐用） */
-.settings-switch {
-  flex-shrink: 0;
-  width: 2.3rem;
-  height: 1.25rem;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--color-base-content) 18%, transparent);
-  position: relative;
-  transition: background 0.18s ease;
+/* ===== 设置项块：小标签 + 控件直显 ===== */
+.settings-block {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 7%, transparent);
+  border-radius: 0.7rem;
 }
 
-.settings-switch.on {
-  background: var(--color-primary);
-}
-
-.settings-switch-knob {
-  position: absolute;
-  top: 0.14rem;
-  left: 0.15rem;
-  width: 0.97rem;
-  height: 0.97rem;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  transition: transform 0.18s ease;
-}
-
-.settings-switch.on .settings-switch-knob {
-  transform: translateX(1.05rem);
-}
-
-.settings-switch.small {
-  width: 1.9rem;
-  height: 1.05rem;
-}
-
-.settings-switch.small .settings-switch-knob {
-  width: 0.8rem;
-  height: 0.8rem;
-  top: 0.12rem;
-  left: 0.13rem;
-}
-
-.settings-switch.small.on .settings-switch-knob {
-  transform: translateX(0.84rem);
-}
-
-/* 卡片显隐列表 */
-.settings-cards {
+.settings-block-label {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin: 0.25rem 0.85rem 0.6rem;
-}
-
-.settings-card-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: baseline;
   gap: 0.5rem;
-  padding: 0.38rem 0.6rem;
-  border-radius: 0.55rem;
-  border: 1px solid color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.settings-block-hint {
+  font-size: 0.7rem;
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+.settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.settings-pill {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  border-radius: 999px;
   background: transparent;
   color: inherit;
+  font-size: 0.78rem;
+  line-height: 1.2;
   cursor: pointer;
-  font-size: 0.8rem;
+  transition: all 0.15s ease;
+  min-height: 34px;
 }
 
-.settings-card-row.off {
-  opacity: 0.45;
+.settings-pill:hover {
+  border-color: color-mix(in oklab, var(--color-primary) 50%, transparent);
+  color: var(--color-primary);
 }
 
-.settings-card-title {
-  white-space: nowrap;
+.settings-pill.on {
+  background: var(--color-primary);
+  border-color: transparent;
+  color: var(--color-primary-content);
+  font-weight: 600;
+}
+
+.settings-pill.on:hover {
+  color: var(--color-primary-content);
+}
+
+.settings-pill.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.widget-h-input.inline {
+  width: 5.5rem;
+  min-height: 34px;
+  padding: 0.3rem 0.55rem;
+}
+
+/* 页面底色色板 */
+.settings-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.settings-swatch {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.settings-swatch:hover {
+  transform: scale(1.12);
+}
+
+.settings-swatch.on {
+  box-shadow: 0 0 0 2px var(--color-base-100), 0 0 0 4px var(--color-primary);
+}
+
+.settings-swatch.custom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
   overflow: hidden;
-  text-overflow: ellipsis;
+  border-style: dashed;
+  font-size: 0.85rem;
+  color: inherit;
+}
+
+.settings-swatch.custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-swatch-plus {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.settings-bg-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.settings-bg-custom .widget-h-input {
+  flex: 0 0 9rem;
 }
 
 /* ===== iframe 小部件 ⋯ 菜单与懒加载占位 ===== */
@@ -472,90 +514,6 @@
   font-size: 0.8rem;
   opacity: 0.75;
   line-height: 1.7;
-}
-
-/* 展示类别：胶囊标签（纯 CSS，双端渲染一致） */
-.settings-cats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr));
-  gap: 0.4rem;
-  padding: 0.25rem 0.85rem 0.85rem;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.settings-cat {
-  padding: 0.34rem 0.3rem;
-  border-radius: 0.6rem;
-  border: 1px solid color-mix(in oklab, var(--color-base-content) 18%, transparent);
-  background: transparent;
-  color: var(--color-base-content);
-  font-size: 0.76rem;
-  line-height: 1.25;
-  text-align: center;
-  cursor: pointer;
-  opacity: 0.72;
-  transition: all 0.15s ease;
-}
-
-.settings-cat:hover {
-  opacity: 1;
-  border-color: color-mix(in oklab, var(--color-primary) 45%, transparent);
-}
-
-.settings-cat.on {
-  background: color-mix(in oklab, var(--color-primary) 88%, transparent);
-  border-color: transparent;
-  color: var(--color-primary-content);
-  opacity: 1;
-  font-weight: 600;
-}
-
-.settings-cat:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-/* 展示类别：胶囊标签（纯 CSS，双端渲染一致） */
-.settings-cats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr));
-  gap: 0.4rem;
-  padding: 0.25rem 0.85rem 0.85rem;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.settings-cat {
-  padding: 0.34rem 0.3rem;
-  border-radius: 0.6rem;
-  border: 1px solid color-mix(in oklab, var(--color-base-content) 18%, transparent);
-  background: transparent;
-  color: var(--color-base-content);
-  font-size: 0.76rem;
-  line-height: 1.25;
-  text-align: center;
-  cursor: pointer;
-  opacity: 0.72;
-  transition: all 0.15s ease;
-}
-
-.settings-cat:hover {
-  opacity: 1;
-  border-color: color-mix(in oklab, var(--color-primary) 45%, transparent);
-}
-
-.settings-cat.on {
-  background: color-mix(in oklab, var(--color-primary) 88%, transparent);
-  border-color: transparent;
-  color: var(--color-primary-content);
-  opacity: 1;
-  font-weight: 600;
-}
-
-.settings-cat:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
 }
 
 .settings-row {
@@ -2231,56 +2189,6 @@
   .ms-btn {
     flex: 1;
   }
-}
-
-/* 诗词区留白（设置-外观） */
-.settings-poem-space {
-  margin: 0.25rem 0.85rem 0.6rem;
-}
-
-.settings-poem-space .widget-menu-heights {
-  padding: 0 0 0.4rem;
-}
-
-/* 页面底色（设置-外观） */
-.settings-bg-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 0 0.4rem;
-}
-
-.settings-bg-picker {
-  width: 2.6rem;
-  height: 2.1rem;
-  padding: 0;
-  border: 1px solid color-mix(in oklab, var(--color-base-content) 16%, transparent);
-  border-radius: 0.45rem;
-  background: transparent;
-  cursor: pointer;
-}
-
-.settings-bg-picker::-webkit-color-swatch-wrapper {
-  padding: 2px;
-}
-
-.settings-bg-picker::-webkit-color-swatch {
-  border: none;
-  border-radius: 0.3rem;
-}
-
-.settings-bg-value {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.settings-bg-swatch {
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 0.25rem;
-  border: 1px solid color-mix(in oklab, var(--color-base-content) 25%, transparent);
-  display: inline-block;
 }
 
 /* ===== 管理工作台结束 ===== */

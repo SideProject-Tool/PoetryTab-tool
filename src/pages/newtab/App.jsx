@@ -92,14 +92,13 @@ export default function App() {
   }, []);
 
   /* 快捷键：S 呼出搜索、1-9 直达常用网站（焦点在输入框时忽略） */
-  const appliedSearchRef = useRef("");
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target && e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
       if (e.key === "s" || e.key === "S") {
         e.preventDefault();
-        setSearchOpen(true); // 快捷键呼出为临时态（不写云端设置）
+        setSearchOpen(true);
       } else if (/^[1-9]$/.test(e.key)) {
         const site = col.data?.quickSites?.[Number(e.key) - 1];
         if (site) {
@@ -112,19 +111,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [col.data]);
 
-  /* 搜索栏开合：默认跟随云端 settings.showSearch（换账号时重新应用）；按钮切换会写回云端 */
-  useEffect(() => {
-    if (!col.data || appliedSearchRef.current === col.uid) return;
-    appliedSearchRef.current = col.uid;
-    setSearchOpen(!!col.data.settings?.showSearch);
-  }, [col.data, col.uid]);
-  const toggleSearch = useCallback(() => {
-    setSearchOpen((o) => {
-      const next = !o;
-      col.setSettings({ showSearch: next });
-      return next;
-    });
-  }, [col]);
+  const toggleSearch = useCallback(() => setSearchOpen((o) => !o), []);
 
   /* 诗词：按展示类别随机抽取，点击换一首 */
   const { getRandomContent, currentContent } = useContentEngine(settings.cats);

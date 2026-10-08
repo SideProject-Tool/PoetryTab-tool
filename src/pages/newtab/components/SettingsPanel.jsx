@@ -1,11 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   IoSettingsOutline as SettingsIcon,
-  IoMoonOutline as MoonIcon,
-  IoSunnyOutline as SunIcon,
-  IoChevronDownOutline as ChevronDownIcon,
-  IoChevronUpOutline as ChevronUpIcon,
-  IoSearchOutline as SearchIcon,
   IoCloudUploadOutline as UploadIcon,
   IoCloudDownloadOutline as DownloadIcon,
   IoCloudOutline as CloudIcon,
@@ -17,12 +12,10 @@ import {
   IoArrowUndoOutline as UndoIcon,
   IoCloseOutline as CloseIcon,
 } from "react-icons/io5";
-import { MdTimelapse as SyncIcon } from "react-icons/md";
 import { SEARCH_ENGINES } from "../services/constants";
 import { openUrl, getBrowserBookmarks, IS_EXT } from "../../../platform";
 import { parseNetscapeHtml } from "../services/bookmarks";
 
-const THEME_LABELS = { sync: "跟随系统", light: "浅色", dark: "深色" };
 const ENGINE_KEYS = Object.keys(SEARCH_ENGINES);
 const CATS = [
   { key: "a", name: "动画" },
@@ -43,23 +36,71 @@ const TABS = [
   { key: "sync", label: "云同步" },
   { key: "data", label: "导入与备份" },
 ];
+const POEM_SPACE_PRESETS = [240, 360, 480];
+const COL_OPTIONS = ["auto", 2, 3, 4, 5];
+/** 页面底色预设（浅色系，与白卡搭配） */
+const BG_PRESETS = [
+  { hex: "#F0F7FF", name: "浅天蓝" },
+  { hex: "#EFF8FF", name: "淡青蓝" },
+  { hex: "#F0FDFA", name: "浅薄荷青" },
+  { hex: "#F5FFF7", name: "浅嫩草绿" },
+  { hex: "#FDF4FF", name: "浅粉紫" },
+  { hex: "#F5F0FF", name: "淡紫罗兰" },
+  { hex: "#FFF7ED", name: "浅暖橙米" },
+  { hex: "#FFF1F2", name: "浅珊瑚粉" },
+  { hex: "#ECFDF5", name: "浅翡翠灰绿" },
+  { hex: "#F0F9FF", name: "浅冰蓝" },
+  { hex: "#F6FEF9", name: "浅青绿" },
+  { hex: "#FFF7F0", name: "浅桃米色" },
+  { hex: "#F8FAFF", name: "淡蓝灰" },
+  { hex: "#F7FAFC", name: "浅灰" },
+];
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** 设置项块：小标签 + 控件直显（无展开态） */
+function Block({ label, hint, children }) {
+  return (
+    <div className="settings-block">
+      <div className="settings-block-label">
+        <span>{label}</span>
+        {hint && <span className="settings-block-hint">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** 通用选择 chip */
+function Chip({ on, onClick, children, title, disabled, style }) {
+  return (
+    <button
+      type="button"
+      className={`settings-pill${on ? " on" : ""}${disabled ? " disabled" : ""}`}
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
 
 /**
- * 设置弹窗（居中 + 三 tab）：外观 / 云同步 / 导入与备份。
- * 全部读写云端收藏的 settings 字段，随看板自动保存。
+ * 设置弹窗（居中 + 三 tab，所有设置项控件直显）：
+ * 外观（主题/搜索引擎/看板列数/诗词区留白/展示类别/页面底色/卡片显隐）
+ * 云同步 / 导入与备份。全部读写云端收藏的 settings 字段，随看板自动保存。
  */
 export default function SettingsPanel({ col }) {
   const [isOpen, setIsOpen] = useState(false);
   const [tab, setTab] = useState("look");
-  const [isCatsExpanded, setIsCatsExpanded] = useState(false);
-  const [isCardsExpanded, setIsCardsExpanded] = useState(false);
-  const [poemExpanded, setPoemExpanded] = useState(false);
-  const [bgExpanded, setBgExpanded] = useState(false);
-  const [isSnapsExpanded, setIsSnapsExpanded] = useState(false);
   const [snaps, setSnaps] = useState(null); // null=未加载 []=空
+  const [isSnapsExpanded, setIsSnapsExpanded] = useState(false);
   const [confirmSnapKey, setConfirmSnapKey] = useState("");
   const [uidDraft, setUidDraft] = useState(null);
   const [msg, setMsg] = useState("");
+  const [poemDraft, setPoemDraft] = useState(null);
+  const [bgHexDraft, setBgHexDraft] = useState(null);
   const htmlInputRef = useRef(null);
   const jsonInputRef = useRef(null);
 
@@ -67,11 +108,16 @@ export default function SettingsPanel({ col }) {
     theme: "sync",
     engine: "baidu",
     cats: ["i"],
-    showSearch: false,
+    cols: "auto",
     hiddenCards: [],
+    poemSpace: 0,
+    pageBg: "",
     ...(col.data?.settings || {}),
   };
   const hiddenCards = Array.isArray(settings.hiddenCards) ? settings.hiddenCards : [];
+  const poemSpace = Math.max(0, Math.round(Number(settings.poemSpace) || 0));
+  const colsSetting = settings.cols === "auto" || Number(settings.cols) >= 2 ? settings.cols : "auto";
+  const pageBg = (settings.pageBg || "").trim();
 
   /* 卡片显隐候选清单（与看板 widgetDefs 的 id 规则一致） */
   const cards = useMemo(() => {
@@ -83,7 +129,6 @@ export default function SettingsPanel({ col }) {
 
   const close = useCallback(() => setIsOpen(false), []);
 
-  /* Esc 关闭弹窗 */
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e) => { if (e.key === "Escape") close(); };
@@ -91,12 +136,9 @@ export default function SettingsPanel({ col }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, close]);
 
-  const cycleTheme = () =>
-    col.setSettings({ theme: settings.theme === "sync" ? "light" : settings.theme === "light" ? "dark" : "sync" });
-  const cycleEngine = () => {
-    const next = ENGINE_KEYS[(ENGINE_KEYS.indexOf(settings.engine) + 1) % ENGINE_KEYS.length];
-    col.setSettings({ engine: next });
-  };
+  const setTheme = (t) => col.setSettings({ theme: t });
+  const setEngine = (k) => col.setSettings({ engine: k });
+  const setCols = (v) => col.setSettings({ cols: v });
   const toggleCat = (key) => {
     const cats = [...settings.cats];
     const idx = cats.indexOf(key);
@@ -109,11 +151,6 @@ export default function SettingsPanel({ col }) {
   const toggleHiddenCard = (id) => {
     col.setSettings({ hiddenCards: hiddenCards.includes(id) ? hiddenCards.filter((x) => x !== id) : [...hiddenCards, id] });
   };
-
-  /* 诗词区留白：0=自动（自然高度）；自定义 1-600 钳位，非法回退 */
-  const POEM_SPACE_PRESETS = [240, 360, 480];
-  const poemSpace = Math.max(0, Math.round(Number(settings.poemSpace) || 0));
-  const [poemDraft, setPoemDraft] = useState(null);
   const commitPoemSpace = () => {
     setPoemDraft((draft) => {
       if (draft === null || draft === "") return null;
@@ -122,18 +159,11 @@ export default function SettingsPanel({ col }) {
       return null;
     });
   };
-  const poemSpaceLabel = poemSpace === 0 ? "自动" : `${poemSpace}px`;
-
-  /* 页面底色：#RGB/#RRGGBB；空 = 跟随主题。取色器即时生效，色号输入回车/失焦提交 */
-  const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
-  const pageBg = (settings.pageBg || "").trim();
-  const [bgHexDraft, setBgHexDraft] = useState(null);
   const commitBgHex = () => {
     setBgHexDraft((draft) => {
-      if (draft === null) return null;
+      if (draft === null || draft === "") return null;
       const v = draft.trim();
-      if (!v) col.setSettings({ pageBg: "" });
-      else if (HEX_RE.test(v)) col.setSettings({ pageBg: v });
+      if (HEX_RE.test(v)) col.setSettings({ pageBg: v });
       return null;
     });
   };
@@ -248,9 +278,6 @@ export default function SettingsPanel({ col }) {
             ? `已保存 ${new Date(col.savedAt).toLocaleTimeString()}`
             : "自动同步";
 
-  const themeLabel = THEME_LABELS[settings.theme] || "跟随系统";
-  const engineLabel = SEARCH_ENGINES[settings.engine]?.label || "百度";
-
   return (
     <div className="settings-container">
       <button className="settings-trigger" onClick={() => setIsOpen(true)} type="button" title="设置">
@@ -285,93 +312,47 @@ export default function SettingsPanel({ col }) {
               {/* ===== 外观 ===== */}
               {tab === "look" && (
                 <>
-                  <button className="settings-row" onClick={cycleTheme} type="button">
-                    <span className="settings-row-icon">
-                      {settings.theme === "light" && <SunIcon className="w-5 h-5" />}
-                      {settings.theme === "dark" && <MoonIcon className="w-5 h-5" />}
-                      {settings.theme === "sync" && <SyncIcon className="w-5 h-5" />}
-                    </span>
-                    <span className="settings-row-label">主题</span>
-                    <span className="settings-row-value">{themeLabel}</span>
-                  </button>
+                  <Block label="主题">
+                    <div className="settings-chips">
+                      <Chip on={settings.theme === "sync"} onClick={() => setTheme("sync")}>跟随系统</Chip>
+                      <Chip on={settings.theme === "light"} onClick={() => setTheme("light")}>浅色</Chip>
+                      <Chip on={settings.theme === "dark"} onClick={() => setTheme("dark")}>深色</Chip>
+                    </div>
+                  </Block>
 
-                  <button className="settings-row" onClick={cycleEngine} type="button">
-                    <span className="settings-row-icon">
-                      <SearchIcon className="w-5 h-5" />
-                    </span>
-                    <span className="settings-row-label">搜索引擎</span>
-                    <span className="settings-row-value">{engineLabel}</span>
-                  </button>
+                  <Block label="搜索引擎">
+                    <div className="settings-chips">
+                      {ENGINE_KEYS.map((k) => (
+                        <Chip key={k} on={settings.engine === k} onClick={() => setEngine(k)}>
+                          {SEARCH_ENGINES[k].label}
+                        </Chip>
+                      ))}
+                    </div>
+                  </Block>
 
-                  <button
-                    className="settings-row"
-                    onClick={() => col.setSettings({ showSearch: !settings.showSearch })}
-                    type="button"
-                    title="开启后搜索栏常驻页面顶部；关闭时点右上角 🔍 或按 S 呼出"
-                  >
-                    <span className="settings-row-icon">
-                      <SearchIcon className="w-5 h-5" />
-                    </span>
-                    <span className="settings-row-label">搜索栏常驻</span>
-                    <span className={`settings-switch ${settings.showSearch ? "on" : ""}`}>
-                      <span className="settings-switch-knob" />
-                    </span>
-                  </button>
+                  <Block label="看板列数" hint="手机恒为单列">
+                    <div className="settings-chips">
+                      {COL_OPTIONS.map((v) => (
+                        <Chip key={String(v)} on={colsSetting === v} onClick={() => setCols(v)}>
+                          {v === "auto" ? "自动" : `${v} 列`}
+                        </Chip>
+                      ))}
+                    </div>
+                  </Block>
 
-                  {/* 看板列数：自动（按窗口宽度 5/4/3/2）或固定 2-5；手机恒为单列 */}
-                  <button
-                    className="settings-row"
-                    onClick={() => {
-                      const order = ["auto", 2, 3, 4, 5];
-                      const cur = settings.cols === "auto" || Number(settings.cols) >= 2 ? settings.cols : "auto";
-                      col.setSettings({ cols: order[(order.indexOf(cur) + 1) % order.length] });
-                    }}
-                    type="button"
-                    title="自动按窗口宽度取 5/4/3/2 列；固定列数全设备一致（手机恒为单列）"
-                  >
-                    <span className="settings-row-icon">
-                      <BookmarksIcon className="w-5 h-5" />
-                    </span>
-                    <span className="settings-row-label">看板列数</span>
-                    <span className="settings-row-value">
-                      {settings.cols === "auto" || !Number(settings.cols) ? "自动" : `${settings.cols} 列`}
-                    </span>
-                  </button>
-
-                  {/* 诗词区留白：区域最小高度，诗词上下居中，下方内容整体下移 */}
-                  <button
-                    className="settings-row"
-                    onClick={() => setPoemExpanded((prev) => !prev)}
-                    type="button"
-                    title="加大后诗词在区域内居中，下方内容整体下移"
-                  >
-                    <span className="settings-row-icon">
-                      <BookmarksIcon className="w-5 h-5" />
-                    </span>
-                    <span className="settings-row-label">诗词区留白</span>
-                    <span className="settings-row-value">{poemSpaceLabel}</span>
-                  </button>
-                  {poemExpanded && (
-                    <div className="settings-poem-space">
-                      <div className="widget-menu-heights">
-                        {[0, ...POEM_SPACE_PRESETS].map((px) => (
-                          <button
-                            key={px}
-                            type="button"
-                            className={`widget-h-chip${poemSpace === px ? " on" : ""}`}
-                            onClick={() => { col.setSettings({ poemSpace: px }); setPoemDraft(null); }}
-                          >
-                            {px === 0 ? "自动" : px}
-                          </button>
-                        ))}
-                      </div>
+                  <Block label="诗词区留白" hint="加大后诗词居中，下方内容整体下移">
+                    <div className="settings-chips">
+                      <Chip on={poemSpace === 0} onClick={() => { col.setSettings({ poemSpace: 0 }); setPoemDraft(null); }}>自动</Chip>
+                      {POEM_SPACE_PRESETS.map((px) => (
+                        <Chip key={px} on={poemSpace === px} onClick={() => { col.setSettings({ poemSpace: px }); setPoemDraft(null); }}>{px}</Chip>
+                      ))}
                       <input
-                        className="widget-h-input"
+                        className="widget-h-input inline"
                         type="number"
                         min={0}
                         max={600}
                         step={10}
-                        placeholder="自定义像素（0-600）…"
+                        placeholder="自定义"
                         value={poemDraft ?? ""}
                         onChange={(e) => setPoemDraft(e.target.value)}
                         onKeyDown={(e) => {
@@ -381,128 +362,86 @@ export default function SettingsPanel({ col }) {
                         onBlur={commitPoemSpace}
                       />
                     </div>
-                  )}
+                  </Block>
 
-                  {/* 页面底色：取色器 + 色号；空 = 跟随主题 */}
-                  <button
-                    className="settings-row"
-                    onClick={() => setBgExpanded((prev) => !prev)}
-                    type="button"
-                    title="自定义整个页面的背景色（色号），卡片保持白底"
-                  >
-                    <span className="settings-row-icon">
-                      <BookmarksIcon className="w-5 h-5" />
-                    </span>
-                    <span className="settings-row-label">页面底色</span>
-                    <span className="settings-row-value">
-                      {HEX_RE.test(pageBg) ? (
-                        <span className="settings-bg-value">
-                          <span className="settings-bg-swatch" style={{ background: pageBg }} />
-                          {pageBg}
-                        </span>
-                      ) : (
-                        "跟随主题"
-                      )}
-                    </span>
-                  </button>
-                  {bgExpanded && (
-                    <div className="settings-poem-space">
-                      <div className="settings-bg-row">
-                        <input
-                          type="color"
-                          className="settings-bg-picker"
-                          value={HEX_RE.test(pageBg) ? pageBg : "#f5f0e8"}
-                          onChange={(e) => col.setSettings({ pageBg: e.target.value })}
-                        />
-                        <input
-                          className="widget-h-input"
-                          type="text"
-                          placeholder="#f5f0e8"
-                          value={bgHexDraft ?? pageBg}
-                          onChange={(e) => setBgHexDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") commitBgHex();
-                            if (e.key === "Escape") setBgHexDraft(null);
-                          }}
-                          onBlur={commitBgHex}
-                          spellCheck="false"
-                        />
-                      </div>
-                      <div className="widget-menu-heights">
-                        <button
-                          type="button"
-                          className={`widget-h-chip${!HEX_RE.test(pageBg) ? " on" : ""}`}
-                          onClick={() => { col.setSettings({ pageBg: "" }); setBgHexDraft(null); }}
-                        >
-                          跟随主题
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    className="settings-row"
-                    onClick={() => setIsCatsExpanded((prev) => !prev)}
-                    type="button"
-                  >
-                    <span className="settings-row-icon">
-                      {isCatsExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
-                    </span>
-                    <span className="settings-row-label">展示类别</span>
-                    <span className="settings-row-value">{settings.cats.length} 项</span>
-                  </button>
-                  {isCatsExpanded && (
-                    <div className="settings-cats">
+                  <Block label="展示类别" hint="至少保留一个">
+                    <div className="settings-chips">
                       {CATS.map((cat) => {
                         const isSelected = settings.cats.includes(cat.key);
                         const isDisabled = isSelected && settings.cats.length <= 1;
                         return (
-                          <button
+                          <Chip
                             key={cat.key}
-                            type="button"
-                            className={`settings-cat ${isSelected ? "on" : ""}`}
-                            onClick={() => toggleCat(cat.key)}
+                            on={isSelected}
                             disabled={isDisabled}
-                            style={isDisabled ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
                             title={isDisabled ? "请至少保留一个类别" : cat.name}
+                            onClick={() => toggleCat(cat.key)}
                           >
                             {cat.name}
-                          </button>
+                          </Chip>
                         );
                       })}
                     </div>
-                  )}
+                  </Block>
 
-                  {/* 卡片显隐 */}
-                  <button
-                    className="settings-row"
-                    onClick={() => setIsCardsExpanded((prev) => !prev)}
-                    type="button"
-                  >
-                    <span className="settings-row-icon">
-                      {isCardsExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
-                    </span>
-                    <span className="settings-row-label">卡片显隐</span>
-                    <span className="settings-row-value">{cards.length - hiddenCards.length} / {cards.length} 显示</span>
-                  </button>
-                  {isCardsExpanded && (
-                    <div className="settings-cards">
-                      {cards.map((c) => (
+                  <Block label="页面底色" hint="预选浅色系，也可自定义色号">
+                    <div className="settings-swatches">
+                      {BG_PRESETS.map((p) => (
                         <button
-                          key={c.id}
+                          key={p.hex}
                           type="button"
-                          className={`settings-card-row ${hiddenCards.includes(c.id) ? "off" : ""}`}
-                          onClick={() => toggleHiddenCard(c.id)}
-                          title={hiddenCards.includes(c.id) ? "点击显示这张卡片" : "点击隐藏这张卡片"}
-                        >
-                          <span className="settings-card-title">{c.title}</span>
-                          <span className={`settings-switch small ${hiddenCards.includes(c.id) ? "" : "on"}`}>
-                            <span className="settings-switch-knob" />
-                          </span>
-                        </button>
+                          className={`settings-swatch${pageBg.toLowerCase() === p.hex.toLowerCase() ? " on" : ""}`}
+                          style={{ background: p.hex }}
+                          title={p.name + " " + p.hex}
+                          onClick={() => col.setSettings({ pageBg: p.hex })}
+                        />
                       ))}
+                      <label className={`settings-swatch custom${pageBg && !BG_PRESETS.some((p) => p.hex.toLowerCase() === pageBg.toLowerCase()) ? " on" : ""}`} title="自定义颜色">
+                        <input
+                          type="color"
+                          value={HEX_RE.test(pageBg) ? pageBg : "#f5f0e8"}
+                          onChange={(e) => col.setSettings({ pageBg: e.target.value })}
+                        />
+                        <span className="settings-swatch-plus">＋</span>
+                      </label>
                     </div>
-                  )}
+                    <div className="settings-bg-custom">
+                      <input
+                        className="widget-h-input inline"
+                        type="text"
+                        placeholder="色号，如 #F0F7FF"
+                        value={bgHexDraft ?? (HEX_RE.test(pageBg) ? pageBg : "")}
+                        onChange={(e) => setBgHexDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitBgHex();
+                          if (e.key === "Escape") setBgHexDraft(null);
+                        }}
+                        onBlur={commitBgHex}
+                        spellCheck="false"
+                      />
+                      {(HEX_RE.test(pageBg) || pageBg) && (
+                        <button type="button" className="ms-btn" onClick={() => { col.setSettings({ pageBg: "" }); setBgHexDraft(null); }}>
+                          恢复默认
+                        </button>
+                      )}
+                    </div>
+                  </Block>
+
+                  <Block label="卡片显隐" hint="点按切换显示/隐藏" >
+                    <div className="settings-chips">
+                      {cards.map((c) => (
+                        <Chip
+                          key={c.id}
+                          on={!hiddenCards.includes(c.id)}
+                          title={hiddenCards.includes(c.id) ? "点击显示这张卡片" : "点击隐藏这张卡片"}
+                          onClick={() => toggleHiddenCard(c.id)}
+                        >
+                          {c.title}
+                        </Chip>
+                      ))}
+                      {cards.length === 0 && <span className="settings-block-hint">还没有卡片</span>}
+                    </div>
+                  </Block>
                 </>
               )}
 
@@ -631,7 +570,7 @@ export default function SettingsPanel({ col }) {
 
                   <button className="settings-row" onClick={toggleSnaps} type="button">
                     <span className="settings-row-icon">
-                      {isSnapsExpanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+                      {isSnapsExpanded ? <ChevronUpPlaceholder /> : <ChevronDownPlaceholder />}
                     </span>
                     <span className="settings-row-label">历史版本</span>
                     <span className="settings-row-value">
@@ -681,4 +620,12 @@ export default function SettingsPanel({ col }) {
       )}
     </div>
   );
+}
+
+/* 历史版本行的展开/收起小图标（避免引入多余图标包） */
+function ChevronDownPlaceholder() {
+  return <span className="chev">▾</span>;
+}
+function ChevronUpPlaceholder() {
+  return <span className="chev">▴</span>;
 }
