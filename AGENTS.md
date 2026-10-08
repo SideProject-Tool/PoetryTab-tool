@@ -39,6 +39,7 @@ npm run split       # 重新子集化江西拙楷字体（subset-zhuokai.mjs）
 npx vite --config vite.web.config.mjs   # 网页版本地开发服务器（注意：直连生产云同步，写真实数据——开发验证一律用一次性测试账号，如 opt-chk-<随机>）
 node scripts/test-worker.mjs  # Worker 本地全量自测（内存 R2，无需部署）
 node scripts/test-auth.mjs    # 线上认证协议自测（注册/挑战/登录/数据读写/越权，随机测试账号）
+node scripts/release.mjs [版本号]  # 一键发布：测试→构建→部署→线上校验→冒烟→商店包（详见「发版与商店提交」）
 ```
 
 ## 部署
@@ -49,15 +50,28 @@ node scripts/test-auth.mjs    # 线上认证协议自测（注册/挑战/登录/
 
 ## 发版与商店提交
 
-按序执行：
+**一键发布**（把全流程固化为脚本，避免漏步骤——尤其「改完忘记部署」）：
 
-1. **版本号**：改 `package.json` 的 `version`（扩展 manifest 继承它；必须大于商店在售版本）
-2. **验证**：`node scripts/test-worker.mjs` 全绿 + `pnpm build && pnpm build:web` 双端通过 + 浏览器手工回归（扩展与网页版都要）
-3. **网页版 + 同步服务**：`./deploy-web.sh`。若改了 API 协议、错误码或数据结构，Worker 与网页**必须同批部署**——新旧混搭会出现行为错乱（例：错误码映射失效显示「网络异常」）
-4. **商店包**：`STORE_BUILD=1 pnpm zip` → `.output/poetrytab-tool-<版本>-chrome.zip`；提交前解包抽查 manifest：**无 `key` 字段**、版本正确、permissions 符合预期
-   - 本地构建（`pnpm build`）带 key 固定扩展 ID；商店构建剔除 key，由商店重新签名（扩展 ID 与本地不同）
-   - 商店审核要点：`bookmarks` 权限需填用途说明（「导入浏览器书签」功能，仅在用户主动点击导入时读取）；数据使用声明如实勾选（收藏数据同步到自有服务器 sync.pathmemos.com，不与第三方共享）；新增权限会触发更严格审核
-   - `store/` 目录是商店素材（截图 1280×800、图标）；提交前截图需与当前界面核对，不符则重截
+```bash
+node scripts/release.mjs [版本号]     # 版本号可省略（按当前版本发布）；--skip-live-smoke 跳过线上冒烟
+```
+
+脚本自动执行并设门禁（任一失败立即中止）：
+
+1. **版本号**：传参则先写入 `package.json`（必须大于商店在售版本；扩展 manifest 继承它）
+2. **Worker 自测**：`node scripts/test-worker.mjs` 全绿才继续
+3. **双端构建**：`pnpm build` + `pnpm build:web`
+4. **部署**：`./deploy-web.sh`（网页版 + Worker 同批——改了 API 协议/错误码/数据结构时必须同批，新旧混搭会行为错乱）
+5. **线上校验**：抓取线上 HTML 确认已引用本次构建的资产指纹（防止「部署没生效还继续走」）、health 检查
+6. **线上冒烟**：`node scripts/test-auth.mjs`（3 次重试取最好；失败仅告警不中止——网络抖动可能误报，健康+资产校验已证明新版本在线）
+7. **商店包**：`STORE_BUILD=1 pnpm zip` → 解包抽查 manifest（无 `key` 字段、版本正确、permissions 符合预期），任何一项不符即中止
+
+脚本完成后仍需人工：浏览器手工回归（登录/建分组/拖拽/手机视口/快照，见「改动后验证」）→ git 提交推送 → 商店上传。
+
+要点：
+- 本地构建（`pnpm build`）带 key 固定扩展 ID；商店构建剔除 key，由商店重新签名（扩展 ID 与本地不同）
+- 商店审核要点：`bookmarks` 权限需填用途说明（「导入浏览器书签」功能，仅在用户主动点击导入时读取）；数据使用声明如实勾选（收藏数据同步到自有服务器 sync.pathmemos.com，不与第三方共享）；新增权限会触发更严格审核
+- `store/` 目录是商店素材（截图 1280×800、图标）；提交前截图需与当前界面核对，不符则重截
 - **扩展分发**：`pnpm build` 后加载 `.output/chrome-mv3`，或 `pnpm zip` 出包。云同步端点 URL 内置于构建产物（`src/pages/newtab/services/constants.js` 的 `CLOUD_SYNC.url`）；会话令牌为登录后运行时下发（PBKDF2 派生 authKey → 服务器会话令牌，存 localStorage `pt.session`），构建产物中不含任何静态 token。
 
 ## 代码结构（改哪里）
