@@ -1,7 +1,9 @@
 /**
  * 卡片管理工作台（⋯ 打开）：
- * - 桌面端宽屏分栏：左侧分组树（子分组增删改）、右侧工具栏 + 列表；手机自动全屏、树变横向 chips
+ * - 桌面端宽屏分栏：左侧分组树（子分组增删改 + 拖拽排序）、右侧工具栏 + 列表；手机自动全屏、树变横向 chips
  * - 列表交互：点行展开行内编辑；低频操作（打开/删除）收进行尾 ⋯ 菜单；按住行首把手拖拽排序
+ * - 树交互：点行切换当前分组；把手拖拽调整子分组顺序（即卡片标签页顺序）；⋯ 菜单编辑/删除
+ * - 菜单状态树/列表相互独立（根层级下同一子分组同时出现在树与列表，共用状态会串扰）
  * - 收录：右上「＋收录」在列表顶部插入编辑行（与编辑同一表单）；标题留空自动取网页标题
  * - 批量：工具栏「批量」展开多行录入层（一行一条），不遮挡列表
  * - 搜索：按标题/网址过滤当前列表（过滤时暂停拖拽）
@@ -28,6 +30,7 @@ import { fetchPageTitle } from "../../services/meta";
 import FolderBrowser from "./FolderBrowser";
 
 const H_INTRO = "点「＋ 收录」添加；标题留空自动取网页名";
+const DRAG_THRESHOLD = 6;
 
 /** 批量文本解析：一行一条，支持「标题 网址」「纯网址」「[标题](网址)」；无效行跳过 */
 function parseBatch(text) {
@@ -71,7 +74,7 @@ function fillTitles(items, ids, apply) {
 
 /* ---------- 行内编辑器（新增/编辑共用） ---------- */
 
-function RowEditor({ initial, isNew, onSave, onCancel }) {
+function RowEditor({ initial, onSave, onCancel }) {
   const [title, setTitle] = useState(initial.title || "");
   const [url, setUrl] = useState(initial.url || "");
   const [err, setErr] = useState("");
@@ -177,17 +180,33 @@ export default function ManageSheet({ col, target, onClose }) {
   const items = isQs ? col.data?.quickSites || [] : currentNode?.children || [];
 
   const [q, setQ] = useState("");
-  const [order, setOrder] = useState(null); // 拖拽预览的本地顺序（id 数组；null=跟随数据）
+  /* 列表拖拽预览 */
+  const [order, setOrder] = useState(null);
   const [dragId, setDragId] = useState(null);
-  const dragRef = useRef(null); // {id, startY, moved}
+  const dragRef = useRef(null);
   const listRef = useRef(null);
+  const orderRef = useRef(null); // up 时读最新预览（不依赖闭包 flush 时序）
+  useEffect(() => { orderRef.current = order; }, [order]);
+  /* 树（子分组）拖拽预览 */
+  const [treeOrder, setTreeOrder] = useState(null);
+  const [treeDragId, setTreeDragId] = useState(null);
+  const treeDragRef = useRef(null);
+  const treeRef = useRef(null);
+  const treeOrderRef = useRef(null);
+  useEffect(() => { treeOrderRef.current = treeOrder; }, [treeOrder]);
+
+  /* 菜单：列表与树/chips 相互独立（根层级下同一子分组同时出现在两侧，共用会串扰） */
+  const [menuId, setMenuId] = useState(null); // 列表行
+  const [treeMenuId, setTreeMenuId] = useState(null); // 树行 + 手机 chips
+  const closeMenus = () => { setMenuId(null); setTreeMenuId(null); setTreeConfirmDelId(null); };
 
   const [editingId, setEditingId] = useState(null); // "new"=新增 | 条目 id
-  const [menuId, setMenuId] = useState(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
-  const [treeRenamingId, setTreeRenamingId] = useState(null);
+  const [treeRenamingId, setTreeRenamingId] = useState(null); // 树行/chips 行内重命名
   const [treeDraft, setTreeDraft] = useState("");
+  const [headerEditing, setHeaderEditing] = useState(false); // 头部当前节点重命名
+  const [headerDraft, setHeaderDraft] = useState("");
   const [treeConfirmDelId, setTreeConfirmDelId] = useState(null);
   const [subAdding, setSubAdding] = useState(false);
   const [subDraft, setSubDraft] = useState("");
@@ -195,22 +214,32 @@ export default function ManageSheet({ col, target, onClose }) {
   const [hint, setHint] = useState("");
   const [browsing, setBrowsing] = useState(null); // 更深层文件夹的浏览浮层
 
-  /* 数据变化时同步本地拖拽顺序（拖拽中不重置） */
+  const subfolders = isQs ? [] : (rootNode?.children || []).filter((c) => c.children);
+  const subById = useMemo(() => new Map(subfolders.map((s) => [s.id, s])), [subfolders]);
+  const atRoot = isQs || currentId === target.id;
+
+  /* 数据变化时重置拖拽预览（拖拽中不重置） */
   useEffect(() => {
     if (!dragId) setOrder(null);
   }, [items, dragId]);
+  useEffect(() => {
+    if (!treeDragId) setTreeOrder(null);
+  }, [subfolders, treeDragId]);
 
   /* Esc：先退编辑/菜单/批量，再关面板 */
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
-      if (editingId || menuId || treeRenamingId) { setEditingId(null); setMenuId(null); setTreeRenamingId(null); return; }
+      if (editingId || menuId || treeMenuId || treeRenamingId || headerEditing) {
+        setEditingId(null); setMenuId(null); setTreeMenuId(null); setTreeRenamingId(null); setHeaderEditing(false);
+        return;
+      }
       if (batchOpen) { setBatchOpen(false); return; }
       onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingId, menuId, treeRenamingId, batchOpen, onClose]);
+  }, [editingId, menuId, treeMenuId, treeRenamingId, headerEditing, batchOpen, onClose]);
 
   const byId = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
 
@@ -228,6 +257,12 @@ export default function ManageSheet({ col, target, onClose }) {
     }
     return list;
   }, [order, items, byId, q]);
+
+  /* 展示子分组：树/chips 拖拽预览顺序（若有） */
+  const displaySubs = useMemo(() => {
+    const ids = treeOrder || subfolders.map((s) => s.id);
+    return ids.map((id) => subById.get(id)).filter(Boolean);
+  }, [treeOrder, subfolders, subById]);
 
   /* ---------- 增删改 ---------- */
 
@@ -260,7 +295,7 @@ export default function ManageSheet({ col, target, onClose }) {
     if (isQs) col.removeQuickSite(row.id);
     else {
       col.removeNode(row.id);
-      if (!row.children && currentId === row.id) setCurrentId(target.id); // 删除的是当前所在子分组：回根
+      if (row.children && currentId === row.id) setCurrentId(target.id); // 删除的是当前所在子分组：回根
     }
     if (editingId === row.id) setEditingId(null);
   };
@@ -286,7 +321,16 @@ export default function ManageSheet({ col, target, onClose }) {
     setSubAdding(false);
   };
 
-  /* ---------- 拖拽排序（行首把手；搜索过滤时停用） ---------- */
+  const commitHeaderRename = () => {
+    setHeaderEditing((prev) => {
+      if (prev && headerDraft.trim() && headerDraft.trim() !== (currentNode?.title || "")) {
+        col.renameNode(currentId, headerDraft.trim());
+      }
+      return false;
+    });
+  };
+
+  /* ---------- 列表拖拽排序（行首把手；搜索过滤时停用） ---------- */
 
   const commitPreview = (id, targetIdx) => {
     const base = (order || items.map((it) => it.id)).filter((x) => x !== id);
@@ -295,16 +339,17 @@ export default function ManageSheet({ col, target, onClose }) {
     setOrder(next);
   };
 
-  const onHandleDown = (e, id) => {
-    if (q.trim()) return; // 过滤视图中顺序与数据不一致，停用拖拽
+  const onListHandleDown = (e, id) => {
+    if (q.trim()) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 合成指针无 capture，不影响本元素上的事件流 */ }
     dragRef.current = { id, startY: e.clientY, moved: false };
   };
-  const onHandleMove = (e) => {
+  const onListHandleMove = (e) => {
     const d = dragRef.current;
     if (!d) return;
-    if (!d.moved && Math.abs(e.clientY - d.startY) < 6) return;
+    if (!d.moved && Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD) return;
     if (!d.moved) { d.moved = true; setDragId(d.id); }
     const rows = [...listRef.current.querySelectorAll(".ms-row:not(.dragging-src)")];
     let idx = rows.length;
@@ -314,12 +359,12 @@ export default function ManageSheet({ col, target, onClose }) {
     }
     commitPreview(d.id, idx);
   };
-  const onHandleUp = () => {
+  const onListHandleUp = () => {
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
     if (d.moved) {
-      const finalOrder = order || items.map((it) => it.id);
+      const finalOrder = orderRef.current || items.map((it) => it.id);
       const to = finalOrder.indexOf(d.id);
       if (to >= 0) col.reorderNode(d.id, to);
     }
@@ -327,14 +372,55 @@ export default function ManageSheet({ col, target, onClose }) {
     setOrder(null);
   };
 
+  /* ---------- 树拖拽排序（子分组把手；把手 click 阻断冒泡防误触切换） ---------- */
+
+  const commitTreePreview = (id, targetIdx) => {
+    const base = (treeOrder || subfolders.map((s) => s.id)).filter((x) => x !== id);
+    const next = [...base];
+    next.splice(Math.max(0, Math.min(base.length, targetIdx)), 0, id);
+    setTreeOrder(next);
+  };
+
+  const onTreeHandleDown = (e, id) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 同上 */ }
+    treeDragRef.current = { id, startY: e.clientY, moved: false };
+  };
+  const onTreeHandleMove = (e) => {
+    const d = treeDragRef.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD) return;
+    if (!d.moved) { d.moved = true; setTreeDragId(d.id); }
+    const rows = [...treeRef.current.querySelectorAll(".ms-tree-row.sub:not(.dragging-src)")];
+    let idx = rows.length;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { idx = i; break; }
+    }
+    commitTreePreview(d.id, idx);
+  };
+  const onTreeHandleUp = () => {
+    const d = treeDragRef.current;
+    if (!d) return;
+    treeDragRef.current = null;
+    if (d.moved) {
+      // reorderNode 的目标索引是「完整兄弟列表」（含书签）中的位置：
+      // 以预览顺序中拖拽项之后紧跟的子分组为锚，插到它前面（无则排到最后）
+      const previewSubs = treeOrderRef.current || subfolders.map((s) => s.id);
+      const nextSub = previewSubs[previewSubs.indexOf(d.id) + 1] || null;
+      const full = rootNode?.children || [];
+      const shortened = full.filter((c) => c.id !== d.id);
+      const to = nextSub ? shortened.findIndex((c) => c.id === nextSub) : shortened.length;
+      if (to >= 0) col.reorderNode(d.id, to);
+    }
+    setTreeDragId(null);
+    setTreeOrder(null);
+  };
+
   /* ---------- 渲染 ---------- */
 
-  const subfolders = isQs ? [] : (rootNode?.children || []).filter((c) => c.children);
-  const atRoot = isQs || currentId === target.id;
-
-  const closeMenus = () => { setMenuId(null); setTreeConfirmDelId(null); };
-
-  const renderRow = (row, idx) => {
+  const renderRow = (row) => {
     const isFolder = !!row.children;
     const editing = editingId === row.id;
     if (editing) {
@@ -342,7 +428,6 @@ export default function ManageSheet({ col, target, onClose }) {
         <div key={row.id} className="ms-row editing">
           <RowEditor
             initial={row}
-            isNew={false}
             onSave={(draft) => saveEdit(row.id, row, draft)}
             onCancel={() => setEditingId(null)}
           />
@@ -367,10 +452,10 @@ export default function ManageSheet({ col, target, onClose }) {
         <span
           className={`ms-row-handle${q.trim() ? " disabled" : ""}`}
           title="拖动排序"
-          onPointerDown={(e) => onHandleDown(e, row.id)}
-          onPointerMove={onHandleMove}
-          onPointerUp={onHandleUp}
-          onPointerCancel={onHandleUp}
+          onPointerDown={(e) => onListHandleDown(e, row.id)}
+          onPointerMove={onListHandleMove}
+          onPointerUp={onListHandleUp}
+          onPointerCancel={onListHandleUp}
           onClick={(e) => e.stopPropagation()} // 拖拽结束合成的 click 不应触发行的点击（编辑/进入）
         >
           <ReorderIcon />
@@ -419,19 +504,80 @@ export default function ManageSheet({ col, target, onClose }) {
     );
   };
 
-  /* 手机端顶部 chips（桌面隐藏，树显示） */
+  /* 树行（子分组）：拖拽把手 + 行内重命名 + ⋯ 菜单 */
+  const renderTreeSub = (s) => {
+    const renaming = treeRenamingId === s.id;
+    if (renaming) {
+      return (
+        <div key={s.id} className="ms-tree-row sub renaming">
+          <input
+            className="ms-tree-rename"
+            autoFocus
+            value={treeDraft}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setTreeDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && treeDraft.trim()) { col.renameNode(s.id, treeDraft.trim()); setTreeRenamingId(null); }
+              if (e.key === "Escape") setTreeRenamingId(null);
+            }}
+            onBlur={() => { if (treeDraft.trim() && treeRenamingId === s.id) col.renameNode(s.id, treeDraft.trim()); setTreeRenamingId(null); }}
+          />
+        </div>
+      );
+    }
+    const menuOpen = treeMenuId === s.id;
+    return (
+      <div
+        key={s.id}
+        className={`ms-tree-row sub${currentId === s.id ? " active" : ""}${treeDragId === s.id ? " dragging-src" : ""}`}
+        onClick={() => { setQ(""); setCurrentId(s.id); }}
+      >
+        <span
+          className="ms-row-handle"
+          title="拖动排序"
+          onPointerDown={(e) => onTreeHandleDown(e, s.id)}
+          onPointerMove={onTreeHandleMove}
+          onPointerUp={onTreeHandleUp}
+          onPointerCancel={onTreeHandleUp}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ReorderIcon />
+        </span>
+        <span className="ms-tree-name">{s.title || "未命名"}</span>
+        <span className="ms-tree-count">{s.children.length}</span>
+        <button
+          type="button"
+          className="ms-tree-more"
+          title="子分组操作"
+          onClick={(e) => { e.stopPropagation(); setTreeMenuId(menuOpen ? null : s.id); }}
+        >
+          <MoreIcon className="w-3.5 h-3.5" />
+        </button>
+        {menuOpen && (
+          <RowMenu
+            row={s}
+            onClose={closeMenus}
+            onEdit={() => { setTreeRenamingId(s.id); setTreeDraft(s.title || ""); }}
+            onOpen={() => {}}
+            onDelete={() => { col.removeNode(s.id); if (currentId === s.id) setCurrentId(target.id); }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  /* 手机端顶部 chips（桌面隐藏；菜单状态与树共用，与列表独立） */
   const chips = (
     <div className="ms-chips">
       {!isQs && (
-        <button
-          type="button"
+        <div
           className={`ms-chip${atRoot ? " active" : ""}`}
           onClick={() => { setQ(""); setCurrentId(target.id); }}
         >
-          {rootNode?.title || "分组"}
-        </button>
+          <span className="ms-chip-name">{rootNode?.title || "分组"}</span>
+        </div>
       )}
-      {subfolders.map((s) => (
+      {displaySubs.map((s) => (
         <div
           key={s.id}
           className={`ms-chip${currentId === s.id ? " active" : ""}`}
@@ -441,12 +587,12 @@ export default function ManageSheet({ col, target, onClose }) {
           {currentId === s.id && (
             <span
               className="ms-chip-more"
-              onClick={(e) => { e.stopPropagation(); setMenuId(menuId === s.id ? null : s.id); }}
+              onClick={(e) => { e.stopPropagation(); setTreeMenuId(treeMenuId === s.id ? null : s.id); }}
             >
               <MoreIcon className="w-3.5 h-3.5" />
             </span>
           )}
-          {menuId === s.id && (
+          {treeMenuId === s.id && (
             <RowMenu
               row={s}
               onClose={closeMenus}
@@ -482,17 +628,17 @@ export default function ManageSheet({ col, target, onClose }) {
       <div className="ms-panel" onClick={(e) => e.stopPropagation()}>
         {/* 头部：当前节点名 + 重命名 + 关闭 */}
         <div className="ms-header">
-          {treeRenamingId && treeRenamingId === currentId ? (
+          {headerEditing ? (
             <input
               className="ms-rename"
               autoFocus
-              value={treeDraft}
-              onChange={(e) => setTreeDraft(e.target.value)}
+              value={headerDraft}
+              onChange={(e) => setHeaderDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && treeDraft.trim()) { col.renameNode(currentId, treeDraft.trim()); setTreeRenamingId(null); }
-                if (e.key === "Escape") setTreeRenamingId(null);
+                if (e.key === "Enter") commitHeaderRename();
+                if (e.key === "Escape") setHeaderEditing(false);
               }}
-              onBlur={() => { if (treeDraft.trim()) { col.renameNode(currentId, treeDraft.trim()); } setTreeRenamingId(null); }}
+              onBlur={commitHeaderRename}
             />
           ) : (
             <h3 className="ms-title">
@@ -502,7 +648,7 @@ export default function ManageSheet({ col, target, onClose }) {
                   type="button"
                   className="ms-title-edit"
                   title="重命名"
-                  onClick={() => { setTreeRenamingId(currentId); setTreeDraft(currentNode?.title || ""); }}
+                  onClick={() => { setHeaderEditing(true); setHeaderDraft(currentNode?.title || ""); }}
                 >
                   <EditIcon className="w-4 h-4" />
                 </button>
@@ -517,7 +663,7 @@ export default function ManageSheet({ col, target, onClose }) {
         <div className="ms-body">
           {/* 左侧分组树（桌面；手机用顶部 chips） */}
           {!isQs && (
-            <div className="ms-side">
+            <div className="ms-side" ref={treeRef}>
               <div
                 className={`ms-tree-row${atRoot ? " active" : ""}`}
                 onClick={() => { setQ(""); setCurrentId(target.id); }}
@@ -526,50 +672,7 @@ export default function ManageSheet({ col, target, onClose }) {
                 <span className="ms-tree-name">{rootNode?.title || "全部"}</span>
                 <span className="ms-tree-count">{(rootNode?.children || []).length}</span>
               </div>
-              {subfolders.map((s) => (
-                <div
-                  key={s.id}
-                  className={`ms-tree-row sub${currentId === s.id ? " active" : ""}`}
-                  onClick={() => { setQ(""); setCurrentId(s.id); }}
-                >
-                  {treeRenamingId === s.id ? (
-                    <input
-                      className="ms-tree-rename"
-                      autoFocus
-                      value={treeDraft}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setTreeDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && treeDraft.trim()) { col.renameNode(s.id, treeDraft.trim()); setTreeRenamingId(null); }
-                        if (e.key === "Escape") setTreeRenamingId(null);
-                      }}
-                      onBlur={() => { if (treeDraft.trim() && treeRenamingId === s.id) col.renameNode(s.id, treeDraft.trim()); setTreeRenamingId(null); }}
-                    />
-                  ) : (
-                    <>
-                      <span className="ms-tree-name">{s.title || "未命名"}</span>
-                      <span className="ms-tree-count">{s.children.length}</span>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="ms-tree-more"
-                    title="子分组操作"
-                    onClick={(e) => { e.stopPropagation(); setMenuId(menuId === s.id ? null : s.id); }}
-                  >
-                    <MoreIcon className="w-3.5 h-3.5" />
-                  </button>
-                  {menuId === s.id && (
-                    <RowMenu
-                      row={s}
-                      onClose={closeMenus}
-                      onEdit={() => { setTreeRenamingId(s.id); setTreeDraft(s.title || ""); }}
-                      onOpen={() => {}}
-                      onDelete={() => col.removeNode(s.id)}
-                    />
-                  )}
-                </div>
-              ))}
+              {displaySubs.map(renderTreeSub)}
               <button type="button" className="ms-tree-add" onClick={() => { setSubAdding(true); setSubDraft(""); }}>
                 <AddIcon className="w-4 h-4" /> 新建子分组
               </button>
@@ -658,10 +761,10 @@ export default function ManageSheet({ col, target, onClose }) {
             <div className="ms-list" ref={listRef}>
               {editingId === "new" && (
                 <div className="ms-row editing">
-                  <RowEditor initial={{}} isNew onSave={saveNew} onCancel={() => setEditingId(null)} />
+                  <RowEditor initial={{}} onSave={saveNew} onCancel={() => setEditingId(null)} />
                 </div>
               )}
-              {displayItems.map((row, i) => renderRow(row, i))}
+              {displayItems.map((row) => renderRow(row))}
               {displayItems.length === 0 && editingId !== "new" && (
                 <div className="ms-empty">
                   {q.trim() ? "没有匹配的结果" : H_INTRO}

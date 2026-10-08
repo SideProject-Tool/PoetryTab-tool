@@ -1,7 +1,7 @@
 {
   "name": "poetrytab-tool",
   "description": "Poetry-Tab - 新标签页：古诗词 · 收藏看板 · 云同步（Chrome 扩展 + 网页版）",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "scripts": {
     "pre": "wxt prepare",
     "dev": "wxt",
