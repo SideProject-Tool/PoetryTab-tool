@@ -233,13 +233,6 @@ export default function BookmarkBoard({ col }) {
     setNewGroup("");
     setModal(null);
   };
-  /* FAB 弹窗支持 Esc 关闭：弹窗开着时全屏遮罩会拦截卡片 ⋯ 的点击，Esc 是唯一键盘逃生口 */
-  useEffect(() => {
-    if (!modal) return;
-    const onKey = (e) => { if (e.key === "Escape") setModal(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [modal]);
   const submitWidget = () => {
     const url = safeUrl(wUrl);
     if (!url) return;
