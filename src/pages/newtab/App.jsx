@@ -159,8 +159,17 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div id="app" className="custom-font" style={{ "--custom-font-name": FONTNAME_LIST[0] }}>
-      {/* 诗词（点击换一首） */}
-      <div className="pc-poem-wrap" onClick={rotatePoem} title="点一下换一首">
+      {/* 诗词（点击换一首）；poemSpace 为区域最小高度，诗词上下居中，下方内容随之整体下移 */}
+      <div
+        className="pc-poem-wrap"
+        onClick={rotatePoem}
+        title="点一下换一首"
+        style={
+          settings.poemSpace > 0
+            ? { minHeight: `${Math.min(600, Math.max(0, Math.round(settings.poemSpace)))}px`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }
+            : undefined
+        }
+      >
         <div id="pc-poem" className={poemFading ? "fading" : ""}>
           {poem ? poem.title : ""}
         </div>

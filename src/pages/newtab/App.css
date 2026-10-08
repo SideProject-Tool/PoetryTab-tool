@@ -2205,4 +2205,13 @@
   }
 }
 
+/* 诗词区留白（设置-外观） */
+.settings-poem-space {
+  margin: 0.25rem 0.85rem 0.6rem;
+}
+
+.settings-poem-space .widget-menu-heights {
+  padding: 0 0 0.4rem;
+}
+
 /* ===== 管理工作台结束 ===== */

@@ -11,6 +11,7 @@ export const SETTINGS_DEFAULTS = {
   cols: "auto", // 看板列数：auto（按宽度 5/4/3/2）或 2-5；<640px 一律单列
   showSearch: false,
   hiddenCards: [],
+  poemSpace: 0, // 诗词区最小高度（像素，0=自然高度）；诗词在区域内垂直居中，下方内容随之整体下移
 };
 
 function uid(prefix) {

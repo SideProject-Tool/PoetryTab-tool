@@ -53,6 +53,7 @@ export default function SettingsPanel({ col }) {
   const [tab, setTab] = useState("look");
   const [isCatsExpanded, setIsCatsExpanded] = useState(false);
   const [isCardsExpanded, setIsCardsExpanded] = useState(false);
+  const [poemExpanded, setPoemExpanded] = useState(false);
   const [isSnapsExpanded, setIsSnapsExpanded] = useState(false);
   const [snaps, setSnaps] = useState(null); // null=未加载 []=空
   const [confirmSnapKey, setConfirmSnapKey] = useState("");
@@ -107,6 +108,20 @@ export default function SettingsPanel({ col }) {
   const toggleHiddenCard = (id) => {
     col.setSettings({ hiddenCards: hiddenCards.includes(id) ? hiddenCards.filter((x) => x !== id) : [...hiddenCards, id] });
   };
+
+  /* 诗词区留白：0=自动（自然高度）；自定义 1-600 钳位，非法回退 */
+  const POEM_SPACE_PRESETS = [240, 360, 480];
+  const poemSpace = Math.max(0, Math.round(Number(settings.poemSpace) || 0));
+  const [poemDraft, setPoemDraft] = useState(null);
+  const commitPoemSpace = () => {
+    setPoemDraft((draft) => {
+      if (draft === null || draft === "") return null;
+      const n = Math.round(Number(draft));
+      col.setSettings({ poemSpace: Number.isFinite(n) ? Math.min(600, Math.max(0, n)) : 0 });
+      return null;
+    });
+  };
+  const poemSpaceLabel = poemSpace === 0 ? "自动" : `${poemSpace}px`;
 
   const handleUidKey = (e) => {
     if (e.key !== "Enter") return;
@@ -307,6 +322,51 @@ export default function SettingsPanel({ col }) {
                       {settings.cols === "auto" || !Number(settings.cols) ? "自动" : `${settings.cols} 列`}
                     </span>
                   </button>
+
+                  {/* 诗词区留白：区域最小高度，诗词上下居中，下方内容整体下移 */}
+                  <button
+                    className="settings-row"
+                    onClick={() => setPoemExpanded((prev) => !prev)}
+                    type="button"
+                    title="加大后诗词在区域内居中，下方内容整体下移"
+                  >
+                    <span className="settings-row-icon">
+                      <BookmarksIcon className="w-5 h-5" />
+                    </span>
+                    <span className="settings-row-label">诗词区留白</span>
+                    <span className="settings-row-value">{poemSpaceLabel}</span>
+                  </button>
+                  {poemExpanded && (
+                    <div className="settings-poem-space">
+                      <div className="widget-menu-heights">
+                        {[0, ...POEM_SPACE_PRESETS].map((px) => (
+                          <button
+                            key={px}
+                            type="button"
+                            className={`widget-h-chip${poemSpace === px ? " on" : ""}`}
+                            onClick={() => { col.setSettings({ poemSpace: px }); setPoemDraft(null); }}
+                          >
+                            {px === 0 ? "自动" : px}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        className="widget-h-input"
+                        type="number"
+                        min={0}
+                        max={600}
+                        step={10}
+                        placeholder="自定义像素（0-600）…"
+                        value={poemDraft ?? ""}
+                        onChange={(e) => setPoemDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitPoemSpace();
+                          if (e.key === "Escape") setPoemDraft(null);
+                        }}
+                        onBlur={commitPoemSpace}
+                      />
+                    </div>
+                  )}
 
                   <button
                     className="settings-row"

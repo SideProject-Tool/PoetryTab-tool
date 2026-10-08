@@ -119,6 +119,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
     "engine": "baidu",             // baidu | google | bing | duckduckgo
     "cats": ["i"],                 // 启用的诗词分类（至少一个）
     "cols": "auto",                // 看板列数：auto 或 2-5（<640px 恒单列）
+    "poemSpace": 0,                // 诗词区最小高度 px（0=自然高度，诗词区内居中）
     "showSearch": false,           // 搜索栏常驻
     "hiddenCards": []              // 隐藏的卡片 id（"qs:quicksites" / "f:xxx" / "w:xxx"）
   },
