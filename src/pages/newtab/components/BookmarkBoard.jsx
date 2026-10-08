@@ -204,18 +204,22 @@ export default function BookmarkBoard({ col }) {
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
-    if (dragId && dropHint) {
-      const cols = baseCols.map((c) => c.filter((id) => id !== dragId));
-      const target = [...cols[dropHint.col]];
-      target.splice(Math.min(dropHint.index, target.length), 0, dragId);
-      cols[dropHint.col] = target;
+    const drop = dropRef.current; // 读最新预览（不依赖闭包 flush 时序）
+    if (drop) {
+      const cols = baseCols.map((c) => c.filter((id) => id !== drop.dragId));
+      const target = [...cols[drop.dropHint.col]];
+      target.splice(Math.min(drop.dropHint.index, target.length), 0, drop.dragId);
+      cols[drop.dropHint.col] = target;
       col.setLayout(columnsToLayout(cols));
     }
     setDragId(null);
     setDropHint(null);
-  }, [dragId, dropHint, baseCols, col]);
-
+  }, [baseCols, col]);
   const onBoardPointerCancel = onBoardPointerUp;
+  const dropRef = useRef(null); // up 时读最新预览（不依赖闭包 flush 时序）
+  useEffect(() => {
+    dropRef.current = dragId && dropHint ? { dragId, dropHint } : null;
+  }, [dragId, dropHint]);
 
   const openQsManage = useCallback(() => setManage({ type: "quicksites" }), []);
   const openFolderManage = useCallback((id) => setManage({ type: "folder", id }), []);
@@ -283,18 +287,28 @@ export default function BookmarkBoard({ col }) {
     return <IframeWidget widget={def.widget} onRemove={col.removeIframe} onUpdate={col.updateIframe} dragHandle={handle} />;
   };
 
-  /* 空看板引导：没有任何内容时提示入口，建第一项后自动消失 */
-  const isEmptyBoard =
+  /* 空看板引导：区分「真的没内容」与「内容被全部隐藏」两种空态 */
+  const isEmptyBoard = widgetDefs.length === 0;
+  const hasAnyContent =
     !quickSites.length && !iframeWidgets.length && (folders || []).every((f) => !(f.children || []).length);
 
   return (
     <div className={`bookmark-board board-rgl cols-${colCount}${dragId ? " dragging" : ""}`} ref={setBoardEl}>
       {isEmptyBoard && (
         <div className="board-onboarding">
-          <div className="board-onboarding-title">从收藏开始你的快捷开始页</div>
-          <div className="board-onboarding-text">
-            点右下角 <b>＋</b> 新建分组或添加小部件；已有浏览器书签可在 <b>设置 → 导入与备份</b> 一键导入
-          </div>
+          {hasAnyContent ? (
+            <>
+              <div className="board-onboarding-title">所有卡片均已隐藏</div>
+              <div className="board-onboarding-text">可在 <b>设置 → 外观 → 卡片显隐</b> 中恢复显示</div>
+            </>
+          ) : (
+            <>
+              <div className="board-onboarding-title">从收藏开始你的快捷开始页</div>
+              <div className="board-onboarding-text">
+                点右下角 <b>＋</b> 新建分组或添加小部件；已有浏览器书签可在 <b>设置 → 导入与备份</b> 一键导入
+              </div>
+            </>
+          )}
         </div>
       )}
 

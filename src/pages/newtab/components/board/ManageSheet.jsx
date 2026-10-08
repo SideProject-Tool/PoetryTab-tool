@@ -198,7 +198,7 @@ export default function ManageSheet({ col, target, onClose }) {
   /* 菜单：列表与树/chips 相互独立（根层级下同一子分组同时出现在两侧，共用会串扰） */
   const [menuId, setMenuId] = useState(null); // 列表行
   const [treeMenuId, setTreeMenuId] = useState(null); // 树行 + 手机 chips
-  const closeMenus = () => { setMenuId(null); setTreeMenuId(null); setTreeConfirmDelId(null); };
+  const closeMenus = () => { setMenuId(null); setTreeMenuId(null); };
 
   const [editingId, setEditingId] = useState(null); // "new"=新增 | 条目 id
   const [batchOpen, setBatchOpen] = useState(false);
@@ -207,7 +207,6 @@ export default function ManageSheet({ col, target, onClose }) {
   const [treeDraft, setTreeDraft] = useState("");
   const [headerEditing, setHeaderEditing] = useState(false); // 头部当前节点重命名
   const [headerDraft, setHeaderDraft] = useState("");
-  const [treeConfirmDelId, setTreeConfirmDelId] = useState(null);
   const [subAdding, setSubAdding] = useState(false);
   const [subDraft, setSubDraft] = useState("");
   const [confirmRootDel, setConfirmRootDel] = useState(false);
