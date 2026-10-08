@@ -20,6 +20,7 @@ class ErrorBoundary extends Component {
     return { failed: true };
   }
   componentDidCatch(err) {
+    window.__lastBoundaryErr = (err && (err.stack || err.message)) || String(err);
     console.error("Poetry-Tab 渲染异常", err);
   }
   render() {
@@ -79,13 +80,20 @@ export default function App() {
     return () => mq.removeEventListener("change", fn);
   }, [settings.theme, applyTheme]);
 
-  /* 页面底色：合法色号覆盖画布背景（html+body，html 背景传播到整个视口），空/非法 = 跟随主题 */
+  /* 页面底色：按解析后的主题取浅色/深色各自的底色（空 = 主题默认），合法色号覆盖画布背景 */
   useEffect(() => {
-    const bg = (settings.pageBg || "").trim();
+    const dark = settings.theme === "dark" || (settings.theme === "sync" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const bg = ((dark ? settings.pageBgDark : settings.pageBgLight) || "").trim();
     const valid = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(bg);
-    document.documentElement.style.background = valid ? bg : "";
-    document.body.style.background = valid ? bg : "";
-  }, [settings.pageBg]);
+    const apply = () => {
+      document.documentElement.style.background = valid ? bg : "";
+      document.body.style.background = valid ? bg : "";
+    };
+    apply();
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [settings.theme, settings.pageBgLight, settings.pageBgDark]);
 
   useEffect(() => {
     document.title = "Poetry-Tab";

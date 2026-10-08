@@ -368,10 +368,10 @@ export default function BookmarkBoard({ col }) {
             <button type="button" className="board-fab-overlay" aria-label="关闭菜单" onClick={() => setFabOpen(false)} />
             <div className="board-fab-menu">
               <button type="button" id="fab-new-group" onClick={() => { setModal("group"); setFabOpen(false); }}>
-                <FolderIcon className="w-4 h-4" /> 新建分组
+                <FolderIcon className="w-4 h-4" /> 网站收藏
               </button>
               <button type="button" id="fab-new-widget" onClick={() => { setModal("widget"); setFabOpen(false); }}>
-                <GridIcon className="w-4 h-4" /> 添加小部件
+                <GridIcon className="w-4 h-4" /> iframe小部件
               </button>
             </div>
           </>
@@ -380,7 +380,7 @@ export default function BookmarkBoard({ col }) {
           type="button"
           id="fab-main"
           className={`board-fab ${fabOpen ? "open" : ""}`}
-          title="新建分组 / 添加小部件"
+          title="网站收藏 / iframe小部件"
           onClick={() => setFabOpen((o) => !o)}
         >
           <AddIcon className="w-7 h-7" />

@@ -39,7 +39,8 @@ const TABS = [
 const POEM_SPACE_PRESETS = [240, 360, 480];
 const COL_OPTIONS = ["auto", 2, 3, 4, 5];
 /** 页面底色预设（浅色系，与白卡搭配） */
-const BG_PRESETS = [
+/** 页面底色预设：浅色主题用浅色系，深色主题用深色系（两套独立配色） */
+const BG_PRESETS_LIGHT = [
   { hex: "#F0F7FF", name: "浅天蓝" },
   { hex: "#EFF8FF", name: "淡青蓝" },
   { hex: "#F0FDFA", name: "浅薄荷青" },
@@ -53,7 +54,17 @@ const BG_PRESETS = [
   { hex: "#F6FEF9", name: "浅青绿" },
   { hex: "#FFF7F0", name: "浅桃米色" },
   { hex: "#F8FAFF", name: "淡蓝灰" },
-  { hex: "#F7FAFC", name: "浅灰" },
+  { hex: "#F7FAFC", name: "带极淡青调的浅灰" },
+];
+const BG_PRESETS_DARK = [
+  { hex: "#1B1E28", name: "静夜蓝" },
+  { hex: "#16181D", name: "石墨黑" },
+  { hex: "#1C2230", name: "深海蓝" },
+  { hex: "#221C2B", name: "暗夜紫" },
+  { hex: "#1E2A24", name: "墨松绿" },
+  { hex: "#2A2226", name: "深棕咖" },
+  { hex: "#2B2024", name: "暗酒红" },
+  { hex: "#1F2430", name: "午夜蓝灰" },
 ];
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -111,13 +122,18 @@ export default function SettingsPanel({ col }) {
     cols: "auto",
     hiddenCards: [],
     poemSpace: 0,
-    pageBg: "",
+    pageBgLight: "",
+    pageBgDark: "",
     ...(col.data?.settings || {}),
   };
   const hiddenCards = Array.isArray(settings.hiddenCards) ? settings.hiddenCards : [];
   const poemSpace = Math.max(0, Math.round(Number(settings.poemSpace) || 0));
   const colsSetting = settings.cols === "auto" || Number(settings.cols) >= 2 ? settings.cols : "auto";
-  const pageBg = (settings.pageBg || "").trim();
+  const pageBgLight = (settings.pageBgLight || "").trim();
+  const pageBgDark = (settings.pageBgDark || "").trim();
+  /* 页面底色：按解析后主题取浅色/深色各自的配置；切换主题时对应底色为空则自动选中第一个 preset */
+  const resolvedDark = settings.theme === "dark" || (settings.theme === "sync" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const activeBg = ((resolvedDark ? settings.pageBgDark : settings.pageBgLight) || "").trim();
 
   /* 卡片显隐候选清单（与看板 widgetDefs 的 id 规则一致） */
   const cards = useMemo(() => {
@@ -163,7 +179,7 @@ export default function SettingsPanel({ col }) {
     setBgHexDraft((draft) => {
       if (draft === null || draft === "") return null;
       const v = draft.trim();
-      if (HEX_RE.test(v)) col.setSettings({ pageBg: v });
+      if (HEX_RE.test(v)) col.setSettings(resolvedDark ? { pageBgDark: v } : { pageBgLight: v });
       return null;
     });
   };
@@ -384,23 +400,23 @@ export default function SettingsPanel({ col }) {
                     </div>
                   </Block>
 
-                  <Block label="页面底色" hint="预选浅色系，也可自定义色号">
+                  <Block label="页面底色" hint={`${resolvedDark ? "深色" : "浅色"}主题专属配色，可自定义色号`}>
                     <div className="settings-swatches">
-                      {BG_PRESETS.map((p) => (
+                      {(resolvedDark ? BG_PRESETS_DARK : BG_PRESETS_LIGHT).map((p) => (
                         <button
                           key={p.hex}
                           type="button"
-                          className={`settings-swatch${pageBg.toLowerCase() === p.hex.toLowerCase() ? " on" : ""}`}
+                          className={`settings-swatch${activeBg.toLowerCase() === p.hex.toLowerCase() ? " on" : ""}`}
                           style={{ background: p.hex }}
                           title={p.name + " " + p.hex}
-                          onClick={() => col.setSettings({ pageBg: p.hex })}
+                          onClick={() => col.setSettings(resolvedDark ? { pageBgDark: p.hex } : { pageBgLight: p.hex })}
                         />
                       ))}
-                      <label className={`settings-swatch custom${pageBg && !BG_PRESETS.some((p) => p.hex.toLowerCase() === pageBg.toLowerCase()) ? " on" : ""}`} title="自定义颜色">
+                      <label className={`settings-swatch custom${activeBg && !((resolvedDark ? BG_PRESETS_DARK : BG_PRESETS_LIGHT).some((p) => p.hex.toLowerCase() === activeBg.toLowerCase())) ? " on" : ""}`} title="自定义颜色">
                         <input
                           type="color"
-                          value={HEX_RE.test(pageBg) ? pageBg : "#f5f0e8"}
-                          onChange={(e) => col.setSettings({ pageBg: e.target.value })}
+                          value={HEX_RE.test(activeBg) ? activeBg : resolvedDark ? "#1B1E28" : "#f5f0e8"}
+                          onChange={(e) => col.setSettings(resolvedDark ? { pageBgDark: e.target.value } : { pageBgLight: e.target.value })}
                         />
                         <span className="settings-swatch-plus">＋</span>
                       </label>
@@ -410,7 +426,7 @@ export default function SettingsPanel({ col }) {
                         className="widget-h-input inline"
                         type="text"
                         placeholder="色号，如 #F0F7FF"
-                        value={bgHexDraft ?? (HEX_RE.test(pageBg) ? pageBg : "")}
+                        value={bgHexDraft ?? (HEX_RE.test(activeBg) ? activeBg : "")}
                         onChange={(e) => setBgHexDraft(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitBgHex();
@@ -419,8 +435,12 @@ export default function SettingsPanel({ col }) {
                         onBlur={commitBgHex}
                         spellCheck="false"
                       />
-                      {(HEX_RE.test(pageBg) || pageBg) && (
-                        <button type="button" className="ms-btn" onClick={() => { col.setSettings({ pageBg: "" }); setBgHexDraft(null); }}>
+                      {activeBg && (
+                        <button
+                          type="button"
+                          className="ms-btn"
+                          onClick={() => col.setSettings(resolvedDark ? { pageBgDark: "" } : { pageBgLight: "" })}
+                        >
                           恢复默认
                         </button>
                       )}

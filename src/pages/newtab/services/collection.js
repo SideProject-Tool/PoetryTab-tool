@@ -11,7 +11,8 @@ export const SETTINGS_DEFAULTS = {
   cols: "auto", // 看板列数：auto（按宽度 5/4/3/2）或 2-5；<640px 一律单列
   hiddenCards: [],
   poemSpace: 0, // 诗词区最小高度（像素，0=自然高度）；诗词在区域内垂直居中，下方内容随之整体下移
-  pageBg: "", // 页面底色（#RGB/#RRGGBB，空=跟随主题）
+  pageBgLight: "", // 浅色主题页面底色（#RGB/#RRGGBB，空=主题默认）
+  pageBgDark: "", // 深色主题页面底色（空=主题默认）
 };
 
 function uid(prefix) {

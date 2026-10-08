@@ -28,8 +28,9 @@ import { openUrl } from "../../../../platform";
 import { findNode, safeUrl } from "../../services/collection";
 import { fetchPageTitle } from "../../services/meta";
 import FolderBrowser from "./FolderBrowser";
+import Popover from "./Popover";
 
-const H_INTRO = "点「＋ 收录」添加；标题留空自动取网页名";
+const H_INTRO = "点「＋ 添加网站」添加；标题留空自动取网页名";
 const DRAG_THRESHOLD = 6;
 
 /** 批量文本解析：一行一条，支持「标题 网址」「纯网址」「[标题](网址)」；无效行跳过 */
@@ -126,17 +127,12 @@ function RowEditor({ initial, onSave, onCancel }) {
 
 /* ---------- 行 ⋯ 菜单 ---------- */
 
-function RowMenu({ row, onClose, onEdit, onOpen, onDelete }) {
-  const ref = useRef(null);
+function RowMenu({ row, anchor, onClose, onEdit, onOpen, onDelete }) {
   const [confirmDel, setConfirmDel] = useState(false);
-  useEffect(() => {
-    const close = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [onClose]);
   const hasChildren = !!row.children;
   return (
-    <div className="ms-row-menu" ref={ref} onClick={(e) => e.stopPropagation()}>
+    <Popover anchor={anchor} onClose={onClose} minWidth={168}>
+      <div className="ms-row-menu">
       <button type="button" onClick={() => { onEdit(); onClose(); }}>
         <EditIcon className="w-4 h-4" /> 编辑
       </button>
@@ -162,7 +158,8 @@ function RowMenu({ row, onClose, onEdit, onOpen, onDelete }) {
           <TrashIcon className="w-4 h-4" /> 删除{hasChildren ? "…" : ""}
         </button>
       )}
-    </div>
+      </div>
+    </Popover>
   );
 }
 
@@ -213,14 +210,7 @@ export default function ManageSheet({ col, target, onClose }) {
   const [browsing, setBrowsing] = useState(null); // 更深层文件夹的浏览浮层
   /* 批量选择与移动 */
   const [selected, setSelected] = useState([]);
-  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
-  const moveAnchorRef = useRef(null);
-  useEffect(() => {
-    if (!moveMenuOpen) return;
-    const close = (e) => { if (!moveAnchorRef.current?.contains(e.target)) setMoveMenuOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [moveMenuOpen]);
+  const [moveMenu, setMoveMenu] = useState(null); // {anchor}
   const toggleSelect = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -253,8 +243,8 @@ export default function ManageSheet({ col, target, onClose }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
-      if (editingId || menuId || treeMenuId || treeRenamingId || headerEditing) {
-        setEditingId(null); setMenuId(null); setTreeMenuId(null); setTreeRenamingId(null); setHeaderEditing(false);
+      if (editingId || menu || treeMenu || treeRenamingId || headerEditing) {
+        setEditingId(null); setMenu(null); setTreeMenu(null); setTreeRenamingId(null); setHeaderEditing(false);
         return;
       }
       if (batchOpen) { setBatchOpen(false); return; }
@@ -455,13 +445,14 @@ export default function ManageSheet({ col, target, onClose }) {
         </div>
       );
     }
-    const menuOpen = menuId === row.id;
+    const menuOpen = menu?.id === row.id;
     return (
       <div
         key={row.id}
         data-id={row.id}
         className={`ms-row${dragId === row.id ? " dragging-src" : ""}${selected.includes(row.id) ? " selected" : ""}`}
         onClick={() => {
+          if (selected.length > 0) { toggleSelect(row.id); return; } // 选中模式：点行切换选中，避免误触编辑
           if (isFolder) {
             if (atRoot) { setQ(""); setCurrentId(row.id); } // 根下的文件夹 = 子分组：树内导航
             else setBrowsing(row.id); // 更深层级交由文件夹浏览浮层
@@ -515,13 +506,18 @@ export default function ManageSheet({ col, target, onClose }) {
             type="button"
             className="ms-row-more"
             title="更多操作"
-            onClick={(e) => { e.stopPropagation(); setMenuId(menuOpen ? null : row.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu(menuOpen ? null : { id: row.id, anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+            }}
           >
             <MoreIcon className="w-4 h-4" />
           </button>
-          {menuOpen && (
+          {menu?.id === row.id && (
             <RowMenu
               row={row}
+              anchor={menu.anchor}
               onClose={closeMenus}
               onEdit={() => setEditingId(row.id)}
               onOpen={() => { const u = safeUrl(row.url); if (u) openUrl(u); }}
@@ -554,7 +550,7 @@ export default function ManageSheet({ col, target, onClose }) {
         </div>
       );
     }
-    const menuOpen = treeMenuId === s.id;
+    const menuOpen = treeMenu?.id === s.id;
     return (
       <div
         key={s.id}
@@ -614,14 +610,15 @@ export default function ManageSheet({ col, target, onClose }) {
           {currentId === s.id && (
             <span
               className="ms-chip-more"
-              onClick={(e) => { e.stopPropagation(); setTreeMenuId(treeMenuId === s.id ? null : s.id); }}
+              onClick={(e) => { e.stopPropagation(); setTreeMenu(treeMenu?.id === s.id ? null : s.id); }}
             >
               <MoreIcon className="w-3.5 h-3.5" />
             </span>
           )}
-          {treeMenuId === s.id && (
+          {treeMenu?.id === s.id && (
             <RowMenu
               row={s}
+              anchor={treeMenu.anchor}
               onClose={closeMenus}
               onEdit={() => { setTreeRenamingId(s.id); setTreeDraft(s.title || ""); }}
               onOpen={() => {}}
@@ -740,14 +737,14 @@ export default function ManageSheet({ col, target, onClose }) {
                 className="ms-btn primary"
                 onClick={() => { setEditingId("new"); setBatchOpen(false); }}
               >
-                ＋ 收录
+                ＋ 添加网站
               </button>
               <button
                 type="button"
                 className={`ms-btn${batchOpen ? " active" : ""}`}
                 onClick={() => { setBatchOpen((o) => !o); setEditingId(null); }}
               >
-                批量
+                批量添加
               </button>
             </div>
 
@@ -784,34 +781,40 @@ export default function ManageSheet({ col, target, onClose }) {
             {selected.length > 0 && !batchOpen && (
               <div className="ms-movebar">
                 <span>已选 {selected.length} 条</span>
-                <div className="ms-row-menu-anchor" ref={moveAnchorRef}>
+                <button type="button" className="ms-btn" onClick={() => setSelected(displayItems.map((r) => r.id))}>全选</button>
+                <div className="ms-row-menu-anchor">
                   <button
                     type="button"
                     className="ms-btn primary"
                     disabled={!moveTargets.length}
-                    onClick={() => setMoveMenuOpen((o) => !o)}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setMoveMenu({ anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+                    }}
                   >
                     移动到…
                   </button>
-                  {moveMenuOpen && (
-                    <div className="ms-row-menu wide">
-                      {moveTargets.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => {
-                            col.moveNodesTo(selected, t.id);
-                            setSelected([]);
-                            setMoveMenuOpen(false);
-                            setHint(`✓ 已移动 ${selected.length} 条到「${t.title}」`);
-                            setTimeout(() => setHint(""), 4000);
-                          }}
-                        >
-                          <FolderIcon className="w-4 h-4" /> {t.title}
-                        </button>
-                      ))}
-                      {!moveTargets.length && <div className="settings-snap-empty">没有可选目标</div>}
-                    </div>
+                  {moveMenu && (
+                    <Popover anchor={moveMenu.anchor} onClose={() => setMoveMenu(null)} minWidth={220}>
+                      <div className="ms-row-menu wide">
+                        {moveTargets.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => {
+                              col.moveNodesTo(selected, t.id);
+                              setSelected([]);
+                              setMoveMenu(null);
+                              setHint(`✓ 已移动 ${selected.length} 条到「${t.title}」`);
+                              setTimeout(() => setHint(""), 4000);
+                            }}
+                          >
+                            <FolderIcon className="w-4 h-4" /> {t.title}
+                          </button>
+                        ))}
+                        {!moveTargets.length && <div className="settings-snap-empty">没有可选目标</div>}
+                      </div>
+                    </Popover>
                   )}
                 </div>
                 <button type="button" className="ms-btn" onClick={() => setSelected([])}>取消选择</button>

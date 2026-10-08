@@ -166,6 +166,7 @@ function ensureShape(d) {
   };
   if (!Array.isArray(settings.cats)) settings.cats = [...SETTINGS_DEFAULTS.cats];
   if (!Array.isArray(settings.hiddenCards)) settings.hiddenCards = [];
+  if (!settings.pageBgLight && settings.pageBg) settings.pageBgLight = settings.pageBg; // 旧字段迁移
   return {
     ...d,
     v: d.v || 1,
