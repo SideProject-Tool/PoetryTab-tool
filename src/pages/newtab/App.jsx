@@ -79,6 +79,14 @@ export default function App() {
     return () => mq.removeEventListener("change", fn);
   }, [settings.theme, applyTheme]);
 
+  /* 页面底色：合法色号覆盖画布背景（html+body，html 背景传播到整个视口），空/非法 = 跟随主题 */
+  useEffect(() => {
+    const bg = (settings.pageBg || "").trim();
+    const valid = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(bg);
+    document.documentElement.style.background = valid ? bg : "";
+    document.body.style.background = valid ? bg : "";
+  }, [settings.pageBg]);
+
   useEffect(() => {
     document.title = "Poetry-Tab";
   }, []);

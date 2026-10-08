@@ -12,6 +12,7 @@ export const SETTINGS_DEFAULTS = {
   showSearch: false,
   hiddenCards: [],
   poemSpace: 0, // 诗词区最小高度（像素，0=自然高度）；诗词在区域内垂直居中，下方内容随之整体下移
+  pageBg: "", // 页面底色（#RGB/#RRGGBB，空=跟随主题）
 };
 
 function uid(prefix) {

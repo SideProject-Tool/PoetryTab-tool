@@ -54,6 +54,7 @@ export default function SettingsPanel({ col }) {
   const [isCatsExpanded, setIsCatsExpanded] = useState(false);
   const [isCardsExpanded, setIsCardsExpanded] = useState(false);
   const [poemExpanded, setPoemExpanded] = useState(false);
+  const [bgExpanded, setBgExpanded] = useState(false);
   const [isSnapsExpanded, setIsSnapsExpanded] = useState(false);
   const [snaps, setSnaps] = useState(null); // null=未加载 []=空
   const [confirmSnapKey, setConfirmSnapKey] = useState("");
@@ -122,6 +123,20 @@ export default function SettingsPanel({ col }) {
     });
   };
   const poemSpaceLabel = poemSpace === 0 ? "自动" : `${poemSpace}px`;
+
+  /* 页面底色：#RGB/#RRGGBB；空 = 跟随主题。取色器即时生效，色号输入回车/失焦提交 */
+  const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+  const pageBg = (settings.pageBg || "").trim();
+  const [bgHexDraft, setBgHexDraft] = useState(null);
+  const commitBgHex = () => {
+    setBgHexDraft((draft) => {
+      if (draft === null) return null;
+      const v = draft.trim();
+      if (!v) col.setSettings({ pageBg: "" });
+      else if (HEX_RE.test(v)) col.setSettings({ pageBg: v });
+      return null;
+    });
+  };
 
   const handleUidKey = (e) => {
     if (e.key !== "Enter") return;
@@ -365,6 +380,63 @@ export default function SettingsPanel({ col }) {
                         }}
                         onBlur={commitPoemSpace}
                       />
+                    </div>
+                  )}
+
+                  {/* 页面底色：取色器 + 色号；空 = 跟随主题 */}
+                  <button
+                    className="settings-row"
+                    onClick={() => setBgExpanded((prev) => !prev)}
+                    type="button"
+                    title="自定义整个页面的背景色（色号），卡片保持白底"
+                  >
+                    <span className="settings-row-icon">
+                      <BookmarksIcon className="w-5 h-5" />
+                    </span>
+                    <span className="settings-row-label">页面底色</span>
+                    <span className="settings-row-value">
+                      {HEX_RE.test(pageBg) ? (
+                        <span className="settings-bg-value">
+                          <span className="settings-bg-swatch" style={{ background: pageBg }} />
+                          {pageBg}
+                        </span>
+                      ) : (
+                        "跟随主题"
+                      )}
+                    </span>
+                  </button>
+                  {bgExpanded && (
+                    <div className="settings-poem-space">
+                      <div className="settings-bg-row">
+                        <input
+                          type="color"
+                          className="settings-bg-picker"
+                          value={HEX_RE.test(pageBg) ? pageBg : "#f5f0e8"}
+                          onChange={(e) => col.setSettings({ pageBg: e.target.value })}
+                        />
+                        <input
+                          className="widget-h-input"
+                          type="text"
+                          placeholder="#f5f0e8"
+                          value={bgHexDraft ?? pageBg}
+                          onChange={(e) => setBgHexDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitBgHex();
+                            if (e.key === "Escape") setBgHexDraft(null);
+                          }}
+                          onBlur={commitBgHex}
+                          spellCheck="false"
+                        />
+                      </div>
+                      <div className="widget-menu-heights">
+                        <button
+                          type="button"
+                          className={`widget-h-chip${!HEX_RE.test(pageBg) ? " on" : ""}`}
+                          onClick={() => { col.setSettings({ pageBg: "" }); setBgHexDraft(null); }}
+                        >
+                          跟随主题
+                        </button>
+                      </div>
                     </div>
                   )}
 
