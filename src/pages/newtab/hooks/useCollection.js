@@ -388,12 +388,13 @@ export function useCollection() {
           setSavedAt(cloudSavedAt);
           setStatus("ready");
         } else {
-          const fresh = defaultData();
+          // 有会话但云端无数据：优先沿用本地 dirty 缓存（离线期间的修改不丢），否则补默认数据
+          const fallback = cached?.dirty && cached.data ? cached.data : defaultData();
           dirtyRef.current = true;
-          setData(fresh);
-          writeCache(uidRef.current, fresh, "", true);
+          setData(fallback);
+          writeCache(uidRef.current, fallback, "", true);
           setStatus("ready");
-          enqueueSave(fresh); // 有会话但云端无数据（注册后未落库过）：补一份默认数据
+          enqueueSave(fallback);
         }
         return;
       }
@@ -529,12 +530,14 @@ export function useCollection() {
       setSavedAt(baseSavedAtRef.current);
       dirtyRef.current = false;
     } else {
-      const fresh = defaultData();
+      // 云端无数据：优先沿用本地 dirty 缓存（离线期间的修改不丢），否则补默认数据
+      const cached = readCache(id);
+      const fallback = cached?.dirty && cached.data ? cached.data : defaultData();
       dirtyRef.current = true;
-      setData(fresh);
-      writeCache(id, fresh, "", true);
+      setData(fallback);
+      writeCache(id, fallback, "", true);
       baseSavedAtRef.current = "";
-      enqueueSave(fresh);
+      enqueueSave(fallback);
     }
     setError("");
     setStatus("ready");
@@ -625,7 +628,9 @@ export function useCollection() {
     setData(d);
     writeCache(uidRef.current, d, baseSavedAtRef.current, true);
     await saveNow();
-    return { ok: true };
+    const uploaded = saveStateRef.current === "saved";
+    if (!uploaded) setError("已替换本地，云端上传失败将自动重试");
+    return { ok: true, uploaded };
   }, [saveNow]);
 
   /** 导入浏览器书签/HTML 书签树：追加为新分组并立即上传（重复 URL 自动跳过），返回导入统计 */
@@ -636,7 +641,8 @@ export function useCollection() {
     const sink = { skipped: 0 };
     mutate(mergeImportedTree(tree, sink));
     await saveNow();
-    return { ok: true, count: total - sink.skipped, skipped: sink.skipped };
+    const uploaded = saveStateRef.current === "saved";
+    return { ok: true, count: total - sink.skipped, skipped: sink.skipped, uploaded };
   }, [mutate, saveNow]);
 
   /* ---------- 删除撤销：删除前快照整份数据，6s 内可一键恢复 ---------- */

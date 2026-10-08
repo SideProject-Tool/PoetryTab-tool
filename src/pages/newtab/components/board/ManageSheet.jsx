@@ -192,9 +192,9 @@ export default function ManageSheet({ col, target, onClose }) {
   useEffect(() => { treeOrderRef.current = treeOrder; }, [treeOrder]);
 
   /* 菜单：列表与树/chips 相互独立（根层级下同一子分组同时出现在两侧，共用会串扰） */
-  const [menuId, setMenuId] = useState(null); // 列表行
-  const [treeMenuId, setTreeMenuId] = useState(null); // 树行 + 手机 chips
-  const closeMenus = () => { setMenuId(null); setTreeMenuId(null); };
+  const [menu, setMenu] = useState(null); // 列表行 {id, anchor}
+  const [treeMenu, setTreeMenu] = useState(null); // 树行 + 手机 chips {id, anchor}
+  const closeMenus = () => { setMenu(null); setTreeMenu(null); };
 
   const [editingId, setEditingId] = useState(null); // "new"=新增 | 条目 id
   const [batchOpen, setBatchOpen] = useState(false);
@@ -252,7 +252,7 @@ export default function ManageSheet({ col, target, onClose }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingId, menuId, treeMenuId, treeRenamingId, headerEditing, batchOpen, onClose]);
+  }, [editingId, menu, treeMenu, treeRenamingId, headerEditing, batchOpen, onClose]);
 
   const byId = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
 
@@ -574,7 +574,11 @@ export default function ManageSheet({ col, target, onClose }) {
           type="button"
           className="ms-tree-more"
           title="子分组操作"
-          onClick={(e) => { e.stopPropagation(); setTreeMenuId(menuOpen ? null : s.id); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            setTreeMenu(treeMenu?.id === s.id ? null : { id: s.id, anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+          }}
         >
           <MoreIcon className="w-3.5 h-3.5" />
         </button>

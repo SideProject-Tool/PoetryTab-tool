@@ -211,7 +211,7 @@ export default function SettingsPanel({ col }) {
       const r = await col.importBookmarks(tree);
       setMsg(
         r.ok
-          ? `✓ 已导入 ${r.count} 条${r.skipped ? `，跳过 ${r.skipped} 条重复` : ""}（新分组追加在最后）`
+          ? `✓ 已导入 ${r.count} 条${r.skipped ? `，跳过 ${r.skipped} 条重复` : ""}（新分组追加在最后）${r.uploaded ? "" : "；云端暂未上传，将自动重试"}`
           : "✗ " + r.error
       );
     } catch (e) {
@@ -227,7 +227,7 @@ export default function SettingsPanel({ col }) {
       const text = await file.text();
       const tree = parseNetscapeHtml(text);
       const r = await col.importBookmarks(tree);
-      setMsg(r.ok ? `✓ 已从文件导入 ${r.count} 条${r.skipped ? `，跳过 ${r.skipped} 条重复` : ""}` : "✗ " + r.error);
+      setMsg(r.ok ? `✓ 已从文件导入 ${r.count} 条${r.skipped ? `，跳过 ${r.skipped} 条重复` : ""}${r.uploaded ? "" : "；云端暂未上传，将自动重试"}` : "✗ " + r.error);
     } catch {
       setMsg("✗ 书签文件解析失败，请确认是浏览器导出的 HTML");
     }
@@ -255,7 +255,7 @@ export default function SettingsPanel({ col }) {
       if (!imported || !Array.isArray(imported.folders)) { setMsg("✗ 不是有效的备份文件"); return; }
       if (!window.confirm("恢复备份将整份替换当前收藏并上传云端，确定继续？")) { setMsg(""); return; }
       const r = await col.replaceAll(imported);
-      setMsg(r.ok ? "✓ 备份已恢复并上传" : "✗ " + r.error);
+      setMsg(r.ok ? (r.uploaded ? "✓ 备份已恢复并上传" : "✓ 已恢复本地，云端上传失败将自动重试") : "✗ " + r.error);
     } catch {
       setMsg("✗ 备份文件解析失败");
     }
