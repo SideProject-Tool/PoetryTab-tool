@@ -66,16 +66,14 @@ export function addChildToFolder(data, folderId, item) {
 }
 
 export function updateItem(data, itemId, patch) {
-  return updateTree(data, (node) => {
-    if (node.id === itemId) return { ...node, ...patch };
-    if (node.children) {
-      return {
-        ...node,
-        children: node.children.map((c) => (c.id === itemId ? { ...c, ...patch } : c)),
-      };
-    }
-    return undefined;
-  });
+  // 全层递归：条目可能在任意深度的子分组内（此前只查两层，深层书签编辑保存不上）
+  const map = (children) =>
+    children.map((c) => {
+      if (c.id === itemId) return { ...c, ...patch };
+      if (c.children) return { ...c, children: map(c.children) };
+      return c;
+    });
+  return { ...data, folders: map(data.folders) };
 }
 
 export function removeItem(data, itemId) {
@@ -101,6 +99,36 @@ export function moveItem(data, itemId, dir) {
   }
   const walk = (children) => {
     const moved = shift(children);
+    if (moved) return moved;
+    for (const c of children) {
+      if (c.children) {
+        const sub = walk(c.children);
+        if (sub) return children.map((x) => (x.id === c.id ? { ...x, children: sub } : x));
+      }
+    }
+    return null;
+  };
+  const folders = walk(data.folders || []);
+  return folders ? { ...data, folders } : data;
+}
+
+/** 在同级列表中把条目移动到任意位置（管理面板拖拽排序用）；不可移动时返回原引用 */
+export function reorderItem(data, id, newIndex) {
+  const reorder = (list) => {
+    const from = list.findIndex((c) => c.id === id);
+    if (from < 0) return null;
+    const to = Math.max(0, Math.min(list.length - 1, newIndex));
+    if (from === to) return null;
+    const next = [...list];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    return next;
+  };
+  if (Array.isArray(data.quickSites)) {
+    const q = reorder(data.quickSites);
+    if (q) return { ...data, quickSites: q };
+  }
+  const walk = (children) => {
+    const moved = reorder(children);
     if (moved) return moved;
     for (const c of children) {
       if (c.children) {

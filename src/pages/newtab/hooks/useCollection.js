@@ -5,6 +5,7 @@ import {
   updateItem,
   removeItem,
   moveItem,
+  reorderItem,
   genId,
   SETTINGS_DEFAULTS,
 } from "../services/collection";
@@ -665,6 +666,7 @@ export function useCollection() {
   const updateNode = useCallback((id, patch) => mutate((d) => updateItem(d, id, patch)), [mutate]);
   const removeNode = useCallback((id) => removeWithUndo("已删除分组或书签", () => mutate((d) => removeItem(d, id))), [mutate, removeWithUndo]);
   const moveNode = useCallback((id, dir) => mutate((d) => moveItem(d, id, dir)), [mutate]);
+  const reorderNode = useCallback((id, newIndex) => mutate((d) => reorderItem(d, id, newIndex)), [mutate]);
   const addQuickSite = useCallback((site) => {
     const id = site.id || genId("qs");
     mutate((d) => ({ ...d, quickSites: [{ id, favicon: "", dateAdded: Date.now(), ...site }, ...d.quickSites] }));
@@ -695,7 +697,7 @@ export function useCollection() {
     uid, hasUid, data, status, error, saveState, savedAt,
     login, register, reload, saveNow, logout,
     listSnaps, restoreSnap, replaceAll, importBookmarks,
-    addItem, addItems, addFolder, renameNode, updateNode, removeNode, moveNode,
+    addItem, addItems, addFolder, renameNode, updateNode, removeNode, moveNode, reorderNode,
     addQuickSite, addQuickSites, updateQuickSite, removeQuickSite,
     addIframe, removeIframe, updateIframe,
     setLayout, setSettings,
