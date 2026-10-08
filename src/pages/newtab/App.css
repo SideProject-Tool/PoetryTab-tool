@@ -1297,10 +1297,27 @@
   cursor: pointer;
   user-select: none;
 }
-.pc-toolbar {
+/* 搜索悬浮层：遮罩盖全页，搜索框悬浮于上部（不推动页面内容）；点遮罩关闭 */
+.pc-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: color-mix(in oklab, var(--color-base-content) 28%, transparent);
+  backdrop-filter: blur(2px);
   display: flex;
   justify-content: center;
-  padding: 0.7rem 0.9rem 0.5rem;
+  align-items: flex-start;
+  padding: 13vh 1rem 0;
+  animation: search-in 0.16s ease;
+}
+
+.pc-toolbar {
+  width: min(34rem, 100%);
+}
+
+@keyframes search-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .settings-trigger:hover {

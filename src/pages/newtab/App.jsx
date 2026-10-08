@@ -198,8 +198,10 @@ export default function App() {
       </button>
 
       {searchOpen && (
-        <div className="pc-toolbar" onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }}>
-          <BookmarkSearch items={searchItems} />
+        <div className="pc-search-overlay" onClick={() => setSearchOpen(false)}>
+          <div className="pc-toolbar" onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }} onClick={(e) => e.stopPropagation()}>
+            <BookmarkSearch items={searchItems} />
+          </div>
         </div>
       )}
 
