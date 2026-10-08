@@ -142,6 +142,8 @@ export default function BookmarkBoard({ col }) {
       const container = colsRef.current;
       if (!card || !container || !card.dataset.id) return;
       const cardRect = card.getBoundingClientRect();
+      // 指针捕获：拖拽中在容器外松开也能收到 pointerup，避免拖拽状态卡死
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 合成指针无 capture */ }
       dragRef.current = {
         pending: true,
         id: card.dataset.id,

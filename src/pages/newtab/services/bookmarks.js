@@ -2,7 +2,7 @@
  * 书签导入：Netscape HTML（Chrome/Firefox/Edge 导出格式）解析 + 树归一。
  * 输出与 getBrowserBookmarks 相同的形状：[{title, children:[{title,url}|子文件夹]}]
  */
-import { safeUrl } from "./collection";
+import { safeUrl, genId } from "./collection";
 
 /** 解析 Netscape 书签 HTML（容错：DL/DT/H3/A 结构_walk，忽略注释与非法链接） */
 export function parseNetscapeHtml(html) {
@@ -44,7 +44,7 @@ export function countLinks(nodes) {
  * 把导入树并入现有数据（不覆盖，追加为新分组；已存在的相同 URL 自动跳过去重）：
  * - 顶层文件夹 → 新的顶层分组
  * - 顶层散链 → 收进「导入书签」分组
- * 返回 mutate 用的变换函数；去重结果写入 sink（{skipped}）
+ * 所有层级节点均补 id（浏览器书签可任意深度嵌套）。返回 mutate 用的变换函数；去重结果写入 sink（{skipped}）
  */
 export function mergeImportedTree(tree, sink) {
   const norm = (u) => {
@@ -82,7 +82,11 @@ export function mergeImportedTree(tree, sink) {
         return true;
       });
     const clean = (nodes) =>
-      dedupe(nodes).map((n) => (n.url ? { title: n.title || n.url, url: n.url } : { title: n.title || "未命名", children: clean(n.children) })).filter((n) => n.url || (n.children && n.children.length));
+      dedupe(nodes).map((n) =>
+        n.url
+          ? { id: genId("b"), title: n.title || n.url, url: n.url, dateAdded: Date.now() }
+          : { id: genId("f"), title: n.title || "未命名", children: clean(n.children) }
+      ).filter((n) => n.url || (n.children && n.children.length));
     const nodes = clean(tree);
     if (!nodes.length) {
       if (sink) sink.skipped = skipped;
@@ -92,12 +96,12 @@ export function mergeImportedTree(tree, sink) {
     const folders = [...(d.folders || [])];
     const loose = nodes.filter((n) => n.url);
     const grouped = nodes.filter((n) => !n.url);
-    for (const g of grouped) folders.push({ id: "f_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), title: g.title, children: g.children.map((c) => ({ ...c, id: "b_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), dateAdded: Date.now() })) });
+    for (const g of grouped) folders.push({ id: genId("f"), title: g.title, children: g.children });
     if (loose.length) {
       folders.push({
-        id: "f_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        id: genId("f"),
         title: "导入书签 " + stamp,
-        children: loose.map((c) => ({ ...c, id: "b_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), dateAdded: Date.now() })),
+        children: loose,
       });
     }
     if (sink) sink.skipped = skipped;

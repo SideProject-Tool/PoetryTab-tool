@@ -150,7 +150,9 @@ async function readDataHead(env, uid) {
   return { etag: obj.etag, savedAt };
 }
 
-let lastIssuedSavedAt = ""; // 同 isolate 内保证 savedAt 严格递增（毫秒碰撞会让 ETag 误报 304）
+let lastIssuedSavedAt = ""; // 同 isolate 内保证 savedAt 严格递增（毫秒碰撞会让 ETag 误报 304）。
+// 已知边界：跨 isolate 同毫秒写入理论上可能产生重复 savedAt（ETag 碰撞 → 一次陈旧 304）；
+// CAS 保证数据不被覆盖，概率极低，记入文档已知边界，不做版本号复杂化
 async function writeDataCAS(env, uid, data, prev) {
   // prev: null（云端无数据，仅当不存在时创建）或 readDataHead 的 {etag}
   const savedAt = new Date(Math.max(Date.now(), Date.parse(lastIssuedSavedAt || 0) + 1)).toISOString();

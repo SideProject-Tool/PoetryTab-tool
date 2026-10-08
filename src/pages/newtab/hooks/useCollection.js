@@ -241,7 +241,7 @@ export function useCollection() {
   }, []);
 
   const resetToIdle = useCallback(() => {
-    clearCache();
+    // 不清 pt.cache：缓存按 uid 隔离，保留未同步改动，同账号重新登录后进入仲裁（不丢数据）
     conflictCloudSavedAtRef.current = "";
     baseSavedAtRef.current = "";
     dirtyRef.current = false;
@@ -292,7 +292,7 @@ export function useCollection() {
       return;
     }
     if (r.status === 401) {
-      // 会话过期：本地未同步的改动无法上云，回到登录门（下次登录以云端为准）
+      // 会话过期：回登录门；未同步改动保留在本地缓存（uid 隔离），重新登录后进入仲裁，不丢数据
       resetToIdle();
       return;
     }
@@ -363,8 +363,10 @@ export function useCollection() {
       if (r.status === 200) {
         const d = r.json && r.json.data;
         const cloudSavedAt = (r.json && r.json.savedAt) || "";
-        if (cached && cached.dirty && d && cloudSavedAt !== cached.savedAt) {
-          // 关页前有未同步修改，且云端已被其他设备推进：直接进入强制仲裁，保住本地改动
+        if (cached && cached.dirty && d && cloudSavedAt !== cached.savedAt &&
+            JSON.stringify(ensureShape(d)) !== JSON.stringify(cached.data)) {
+          // 关页前有未同步修改，且云端已被推进、且内容确实不同：进入强制仲裁，保住本地改动
+          //（内容一致 = 用户自己的关页上传已生效，静默采纳云端即可）
           conflictCloudSavedAtRef.current = cloudSavedAt;
           baseSavedAtRef.current = cached.savedAt;
           dirtyRef.current = true;
@@ -501,7 +503,21 @@ export function useCollection() {
     if (r.status === 401) return { ok: false, code: "bad-login" }; // ID 不存在与密码错误统一提示，防枚举
     if (r.status !== 200 || !r.json || !r.json.session) return { ok: false, code: "network" };
     applyAuth(id, r.json.session);
+    // 重登录仲裁：本账号缓存里有未同步改动、且云端已被推进、且内容确实不同 → 强制仲裁（不丢本地改动）
+    const cached = readCache(id);
     const d = r.json.data;
+    const cloudSavedAt = r.json.savedAt || "";
+    if (cached?.dirty && d && cloudSavedAt !== cached.savedAt &&
+        JSON.stringify(ensureShape(d)) !== JSON.stringify(cached.data)) {
+      conflictCloudSavedAtRef.current = cloudSavedAt;
+      baseSavedAtRef.current = cached.savedAt;
+      dirtyRef.current = true;
+      setData(cached.data);
+      setSaveState("conflict");
+      setError("云端有其他设备的修改，请在设置中选择以本地或云端为准");
+      setStatus("ready");
+      return { ok: true };
+    }
     if (d) {
       const shaped = ensureShape(d);
       setData(shaped);
