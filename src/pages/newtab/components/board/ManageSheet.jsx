@@ -225,12 +225,17 @@ export default function ManageSheet({ col, target, onClose }) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const subfolders = (rootNode?.children || []).filter((c) => c.children);
-  /* 批量移动的目标清单：分组面板 = 根分组 + 其子分组；常用网站面板 = 所有顶层分组 */
+  /* 批量移动的目标清单：账号内所有分组与子分组（排除当前所在分组），支持跨顶层分组移动 */
   const moveTargets = useMemo(() => {
-    const list = rootNode ? [{ id: rootNode.id, title: rootNode.title || "未命名" }] : [];
-    for (const s of subfolders) list.push({ id: s.id, title: s.title || "未命名" });
+    const list = [];
+    for (const f of col.data?.folders || []) {
+      list.push({ id: f.id, title: f.title || "未命名" });
+      for (const c of f.children || []) {
+        if (c.children) list.push({ id: c.id, title: `${f.title || "未命名"} / ${c.title || "子分组"}` });
+      }
+    }
     return list.filter((t) => t.id !== currentId);
-  }, [rootNode, subfolders, currentId]);
+  }, [col.data, currentId]);
   /* 切换视图/数据变化时清空选择与预览 */
   useEffect(() => { setSelected([]); }, [currentId, items]);
   const subById = useMemo(() => new Map(subfolders.map((s) => [s.id, s])), [subfolders]);
