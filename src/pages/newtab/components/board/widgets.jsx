@@ -168,30 +168,6 @@ const GroupWidgetBase = ({ folder, onOpenFolder, onManage, dragHandle }) => {
   );
 }
 
-/** 常用网站卡片 */
-const QuickSitesWidgetBase = ({ sites, onManage, dragHandle }) => {
-  return (
-    <div className="board-widget">
-      <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
-        <h3 className="board-widget-title">常用网站</h3>
-        <div className="board-widget-actions">
-          <button type="button" className="board-widget-action" title="管理" onClick={onManage}>
-            <MoreIcon className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      <div className="board-widget-body">
-        <div className="bt-grid">
-          {sites.map((s) => (
-            <BookmarkTile key={s.id} item={s} />
-          ))}
-        </div>
-        {sites.length === 0 && <div className="bt-empty">常用网站为空，点 ⋯ 添加</div>}
-      </div>
-    </div>
-  );
-}
-
 /** iframe 小部件卡片：操作收进 ⋯ 菜单；iframe 视口内才挂载（挂载后本页会话内不重载） */
 const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
   const [reloadKey, setReloadKey] = useState(0);
@@ -334,6 +310,5 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
 /* memo 比较器忽略 dragHandle：dnd 的 attributes/listeners 每渲染都是新对象，
    但监听器按卡片 id 闭包稳定，忽略其引用变化不影响功能，可避免拖拽期全树重渲染 */
 export const GroupWidget = memo(GroupWidgetBase, (a, b) => a.folder === b.folder && a.onOpenFolder === b.onOpenFolder && a.onManage === b.onManage);
-export const QuickSitesWidget = memo(QuickSitesWidgetBase, (a, b) => a.sites === b.sites && a.onManage === b.onManage);
 export const IframeWidget = memo(IframeWidgetBase, (a, b) => a.widget === b.widget && a.onRemove === b.onRemove && a.onUpdate === b.onUpdate);
 export { TileGrid };

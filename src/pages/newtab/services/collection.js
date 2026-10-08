@@ -1,6 +1,6 @@
 /**
  * 收藏数据树的纯函数操作（全部返回新引用，配合 React）。
- * 数据形状：{ folders: [ {id, title, children: [书签|子文件夹]} ], quickSites, iframeWidgets, settings, layout }
+ * 数据形状：{ folders: [ {id, title, children: [书签|子文件夹]} ], iframeWidgets, settings, layout }
  * 书签 = { id, title, url, dateAdded }
  */
 
@@ -94,10 +94,6 @@ export function moveItem(data, itemId, dir) {
     next.splice(to, 0, next.splice(idx, 1)[0]);
     return next;
   };
-  if (Array.isArray(data.quickSites)) {
-    const q = shift(data.quickSites);
-    if (q) return { ...data, quickSites: q };
-  }
   const walk = (children) => {
     const moved = shift(children);
     if (moved) return moved;
@@ -124,10 +120,6 @@ export function reorderItem(data, id, newIndex) {
     next.splice(to, 0, next.splice(from, 1)[0]);
     return next;
   };
-  if (Array.isArray(data.quickSites)) {
-    const q = reorder(data.quickSites);
-    if (q) return { ...data, quickSites: q };
-  }
   const walk = (children) => {
     const moved = reorder(children);
     if (moved) return moved;
@@ -158,7 +150,6 @@ export function moveNodesTo(data, ids, folderId) {
       return acc;
     }, []);
   const folders = cut(data.folders || []);
-  const quickSites = cut(data.quickSites || []);
 
   let target = null;
   const find = (list) => {
@@ -175,7 +166,7 @@ export function moveNodesTo(data, ids, folderId) {
   const moved = out.filter((n) => !containsTarget(n)); // 跳过会造成成环的项
   if (!moved.length) return data;
   target.children = [...moved, ...target.children];
-  return { ...data, folders, quickSites };
+  return { ...data, folders };
 }
 
 /** 展平为搜索用列表：[{item, path}] */

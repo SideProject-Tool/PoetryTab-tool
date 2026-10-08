@@ -91,7 +91,7 @@ export default function App() {
     document.title = "Poetry-Tab";
   }, []);
 
-  /* 快捷键：S 呼出搜索、1-9 直达常用网站（焦点在输入框时忽略） */
+  /* 快捷键：S 呼出搜索（焦点在输入框时忽略） */
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target && e.target.tagName;
@@ -99,17 +99,11 @@ export default function App() {
       if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         setSearchOpen(true);
-      } else if (/^[1-9]$/.test(e.key)) {
-        const site = col.data?.quickSites?.[Number(e.key) - 1];
-        if (site) {
-          const url = safeUrl(site.url);
-          if (url) openUrl(url);
-        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [col.data]);
+  }, []);
 
   const toggleSearch = useCallback(() => setSearchOpen((o) => !o), []);
 

@@ -169,15 +169,14 @@ function RowMenu({ row, onClose, onEdit, onOpen, onDelete }) {
 /* ---------- 主组件 ---------- */
 
 export default function ManageSheet({ col, target, onClose }) {
-  const isQs = target.type === "quicksites";
-  const rootNode = !isQs && col.data ? findNode(col.data, target.id)?.node : null;
+  const rootNode = col.data ? findNode(col.data, target.id)?.node : null;
 
   /* 当前所在节点：根分组 或 子分组 */
-  const [currentId, setCurrentId] = useState(isQs ? null : target.id);
-  const node = isQs ? null : findNode(col.data, currentId)?.node;
-  const currentNode = isQs ? null : node;
+  const [currentId, setCurrentId] = useState(target.id);
+  const node = findNode(col.data, currentId)?.node;
+  const currentNode = node;
 
-  const items = isQs ? col.data?.quickSites || [] : currentNode?.children || [];
+  const items = currentNode?.children || [];
 
   const [q, setQ] = useState("");
   /* 列表拖拽预览 */
@@ -225,18 +224,17 @@ export default function ManageSheet({ col, target, onClose }) {
   const toggleSelect = (id) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const subfolders = isQs ? [] : (rootNode?.children || []).filter((c) => c.children);
+  const subfolders = (rootNode?.children || []).filter((c) => c.children);
   /* 批量移动的目标清单：分组面板 = 根分组 + 其子分组；常用网站面板 = 所有顶层分组 */
   const moveTargets = useMemo(() => {
-    if (isQs) return (col.data?.folders || []).map((f) => ({ id: f.id, title: f.title || "未命名" }));
     const list = rootNode ? [{ id: rootNode.id, title: rootNode.title || "未命名" }] : [];
     for (const s of subfolders) list.push({ id: s.id, title: s.title || "未命名" });
     return list.filter((t) => t.id !== currentId);
-  }, [isQs, rootNode, subfolders, currentId]);
+  }, [rootNode, subfolders, currentId]);
   /* 切换视图/数据变化时清空选择与预览 */
-  useEffect(() => { setSelected([]); }, [currentId, isQs, items]);
+  useEffect(() => { setSelected([]); }, [currentId, items]);
   const subById = useMemo(() => new Map(subfolders.map((s) => [s.id, s])), [subfolders]);
-  const atRoot = isQs || currentId === target.id;
+  const atRoot = currentId === target.id;
 
   /* 数据变化时重置拖拽预览（拖拽中不重置） */
   useEffect(() => {
@@ -286,12 +284,12 @@ export default function ManageSheet({ col, target, onClose }) {
 
   /* ---------- 增删改 ---------- */
 
-  const applyPatch = (id, patch) => (isQs ? col.updateQuickSite(id, patch) : col.updateNode(id, patch));
+  const applyPatch = (id, patch) => col.updateNode(id, patch);
 
   const saveNew = ({ title, url }) => {
     const fallback = url ? url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") : "";
     const item = { title: title || fallback, ...(url ? { url } : {}) };
-    const id = isQs ? col.addQuickSite(item) : col.addItem(currentId, item);
+    const id = col.addItem(currentId, item);
     setEditingId(null);
     if (!title && url) {
       setHint("已收录，正在获取网页标题…");
@@ -312,18 +310,15 @@ export default function ManageSheet({ col, target, onClose }) {
   };
 
   const deleteRow = (row) => {
-    if (isQs) col.removeQuickSite(row.id);
-    else {
-      col.removeNode(row.id);
-      if (row.children && currentId === row.id) setCurrentId(target.id); // 删除的是当前所在子分组：回根
-    }
+    col.removeNode(row.id);
+    if (row.children && currentId === row.id) setCurrentId(target.id); // 删除的是当前所在子分组：回根
     if (editingId === row.id) setEditingId(null);
   };
 
   const submitBatch = () => {
     const parsed = parseBatch(batchText);
     if (!parsed.length) return;
-    const ids = isQs ? col.addQuickSites(parsed) : col.addItems(currentId, parsed);
+    const ids = col.addItems(currentId, parsed);
     const pending = parsed.filter((it) => !it.title).length;
     setBatchText("");
     setBatchOpen(false);
@@ -598,14 +593,12 @@ export default function ManageSheet({ col, target, onClose }) {
   /* 手机端顶部 chips（桌面隐藏；菜单状态与树共用，与列表独立） */
   const chips = (
     <div className="ms-chips">
-      {!isQs && (
-        <div
-          className={`ms-chip${atRoot ? " active" : ""}`}
-          onClick={() => { setQ(""); setCurrentId(target.id); }}
-        >
-          <span className="ms-chip-name">{rootNode?.title || "分组"}</span>
-        </div>
-      )}
+      <div
+        className={`ms-chip${atRoot ? " active" : ""}`}
+        onClick={() => { setQ(""); setCurrentId(target.id); }}
+      >
+        <span className="ms-chip-name">{rootNode?.title || "分组"}</span>
+      </div>
       {displaySubs.map((s) => (
         <div
           key={s.id}
@@ -671,17 +664,15 @@ export default function ManageSheet({ col, target, onClose }) {
             />
           ) : (
             <h3 className="ms-title">
-              {isQs ? "常用网站" : currentNode?.title || "未命名"}
-              {!isQs && (
-                <button
-                  type="button"
-                  className="ms-title-edit"
-                  title="重命名"
-                  onClick={() => { setHeaderEditing(true); setHeaderDraft(currentNode?.title || ""); }}
-                >
-                  <EditIcon className="w-4 h-4" />
-                </button>
-              )}
+              {currentNode?.title || "未命名"}
+              <button
+                type="button"
+                className="ms-title-edit"
+                title="重命名"
+                onClick={() => { setHeaderEditing(true); setHeaderDraft(currentNode?.title || ""); }}
+              >
+                <EditIcon className="w-4 h-4" />
+              </button>
             </h3>
           )}
           <button type="button" className="ms-close" onClick={onClose} title="关闭 (Esc)">
@@ -691,8 +682,7 @@ export default function ManageSheet({ col, target, onClose }) {
 
         <div className="ms-body">
           {/* 左侧分组树（桌面；手机用顶部 chips） */}
-          {!isQs && (
-            <div className="ms-side" ref={treeRef}>
+          <div className="ms-side" ref={treeRef}>
               <div
                 className={`ms-tree-row${atRoot ? " active" : ""}`}
                 onClick={() => { setQ(""); setCurrentId(target.id); }}
@@ -720,7 +710,6 @@ export default function ManageSheet({ col, target, onClose }) {
                 />
               )}
             </div>
-          )}
 
           {/* 右侧主区 */}
           <div className="ms-main">
@@ -840,7 +829,7 @@ export default function ManageSheet({ col, target, onClose }) {
             </div>
 
             {/* 根分组删除（两次确认；仅根层级显示） */}
-            {!isQs && atRoot && (
+            {atRoot && (
               <div className="ms-footer">
                 {confirmRootDel ? (
                   <button

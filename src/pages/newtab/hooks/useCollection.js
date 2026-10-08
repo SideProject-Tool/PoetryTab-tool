@@ -153,7 +153,8 @@ function defaultData() {
 }
 /** 云端数据兜底：数组字段缺失/损坏时补默认值。
  *  深度归一：folder 补 children、剔除 null/非对象项、settings.cats 非数组回退默认，避免畸形数据渲染崩溃。
- *  layout 保持原样透传：新格式为对象 {v:2,cols}（旧客户端按缺失处理自动装箱），旧格式为坐标数组 */
+ *  layout 保持原样透传：新格式为对象 {v:2,cols}（旧客户端按缺失处理自动装箱），旧格式为坐标数组。
+ *  老数据「常用网站」（quickSites）已下线：读取时直接丢弃（v1.5.0） */
 function ensureShape(d) {
   if (!d || typeof d !== "object") return defaultData();
   const normList = (list) =>
@@ -169,7 +170,7 @@ function ensureShape(d) {
     ...d,
     v: d.v || 1,
     folders,
-    quickSites: normList(d.quickSites),
+    quickSites: [],
     iframeWidgets: normList(d.iframeWidgets),
     layout: d.layout ?? { v: 2, cols: [[], [], [], [], []] },
     settings,
@@ -686,26 +687,6 @@ export function useCollection() {
   const reorderNode = useCallback((id, newIndex) => mutate((d) => reorderItem(d, id, newIndex)), [mutate]);
   /** 批量移动条目到目标分组/子分组（跨层级、防成环） */
   const moveNodesTo = useCallback((ids, folderId) => mutate((d) => moveToFolderSvc(d, ids, folderId)), [mutate]);
-  const addQuickSite = useCallback((site) => {
-    const id = site.id || genId("qs");
-    mutate((d) => ({ ...d, quickSites: [{ id, favicon: "", dateAdded: Date.now(), ...site }, ...d.quickSites] }));
-    return id;
-  }, [mutate]);
-  /** 批量收录常用网站（一次保存）；返回 id 数组 */
-  const addQuickSites = useCallback((items) => {
-    const ids = [];
-    mutate((d) => ({
-      ...d,
-      quickSites: [...items.map((it) => {
-        const id = it.id || genId("qs");
-        ids.push(id);
-        return { id, favicon: "", dateAdded: Date.now(), ...it };
-      }), ...d.quickSites],
-    }));
-    return ids;
-  }, [mutate]);
-  const updateQuickSite = useCallback((id, patch) => mutate((d) => ({ ...d, quickSites: d.quickSites.map((s) => (s.id === id ? { ...s, ...patch } : s)) })), [mutate]);
-  const removeQuickSite = useCallback((id) => removeWithUndo("已删除常用网站", () => mutate((d) => ({ ...d, quickSites: d.quickSites.filter((s) => s.id !== id) }))), [mutate, removeWithUndo]);
   const addIframe = useCallback((widget) => mutate((d) => ({ ...d, iframeWidgets: [...(d.iframeWidgets || []), { id: genId("iw"), ...widget }] })), [mutate]);
   const removeIframe = useCallback((id) => removeWithUndo("已删除小部件", () => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).filter((w) => w.id !== id) }))), [mutate, removeWithUndo]);
   const updateIframe = useCallback((id, patch) => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).map((w) => (w.id === id ? { ...w, ...patch } : w)) })), [mutate]);
@@ -717,7 +698,7 @@ export function useCollection() {
     login, register, reload, saveNow, logout,
     listSnaps, restoreSnap, replaceAll, importBookmarks,
     addItem, addItems, addFolder, renameNode, updateNode, removeNode, moveNode, reorderNode, moveNodesTo,
-    addQuickSite, addQuickSites, updateQuickSite, removeQuickSite,
+
     addIframe, removeIframe, updateIframe,
     setLayout, setSettings,
     undoInfo, undoRemove, dismissUndo,

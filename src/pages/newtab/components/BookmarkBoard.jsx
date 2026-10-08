@@ -8,7 +8,7 @@ import {
 import { safeUrl } from "../services/collection";
 import { colsForWidth, REF_SLOTS } from "../grid";
 import { GAP, defaultCardH, normalizeLayout, migrateV1Layout, visibleColumns, columnsToLayout } from "./board/layoutEngine";
-import { GroupWidget, QuickSitesWidget, IframeWidget } from "./board/widgets";
+import { GroupWidget, IframeWidget } from "./board/widgets";
 import ManageSheet from "./board/ManageSheet";
 import FolderBrowser from "./board/FolderBrowser";
 import GateScreen from "./board/GateScreen";
@@ -64,7 +64,6 @@ export default function BookmarkBoard({ col }) {
   }, [boardEl]);
 
   const folders = useMemo(() => (data ? data.folders || [] : []), [data]);
-  const quickSites = useMemo(() => (data ? data.quickSites || [] : []), [data]);
   const iframeWidgets = useMemo(() => (data ? data.iframeWidgets || [] : []), [data]);
 
   /* 卡片显隐（云端 settings.hiddenCards） */
@@ -73,9 +72,9 @@ export default function BookmarkBoard({ col }) {
     return new Set(list.filter((x) => typeof x === "string"));
   }, [data?.settings?.hiddenCards]);
 
-  /* 网格内的卡片清单：常用网站 + 各分组 + iframe 小部件（按设置隐藏） */
+  /* 网格内的卡片清单：各分组 + iframe 小部件（按设置隐藏） */
   const widgetDefs = useMemo(() => {
-    const list = hiddenCards.has("qs:quicksites") ? [] : [{ id: "qs:quicksites", kind: "qs", title: "常用网站" }];
+    const list = [];
     for (const f of folders) {
       if (!hiddenCards.has("f:" + f.id)) list.push({ id: "f:" + f.id, kind: "folder", folder: f, title: f.title || "未命名" });
     }
@@ -224,7 +223,6 @@ export default function BookmarkBoard({ col }) {
     dropRef.current = dragId && dropHint ? { dragId, dropHint } : null;
   }, [dragId, dropHint]);
 
-  const openQsManage = useCallback(() => setManage({ type: "quicksites" }), []);
   const openFolderManage = useCallback((id) => setManage({ type: "folder", id }), []);
   const openFolderBrowser = useCallback((id) => setBrowsing(id), []);
 
@@ -283,8 +281,6 @@ export default function BookmarkBoard({ col }) {
   }
 
   const renderWidgetBody = (def, handle) => {
-    if (def.kind === "qs")
-      return <QuickSitesWidget sites={quickSites} onManage={openQsManage} dragHandle={handle} />;
     if (def.kind === "folder")
       return (
         <GroupWidget
@@ -300,7 +296,7 @@ export default function BookmarkBoard({ col }) {
   /* 空看板引导：区分「真的没内容」与「内容被全部隐藏」两种空态 */
   const isEmptyBoard = widgetDefs.length === 0;
   const hasAnyContent =
-    !quickSites.length && !iframeWidgets.length && (folders || []).every((f) => !(f.children || []).length);
+    !iframeWidgets.length && (folders || []).every((f) => !(f.children || []).length);
 
   return (
     <div className={`bookmark-board board-rgl cols-${colCount}${dragId ? " dragging" : ""}`} ref={setBoardEl}>
