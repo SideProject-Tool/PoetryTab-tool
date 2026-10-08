@@ -135,7 +135,8 @@ export default function BookmarkBoard({ col }) {
 
   const onBoardPointerDown = useCallback(
     (e) => {
-      if (!dndEnabled || e.button > 0 || dragRef.current) return;
+      if (!dndEnabled || e.button > 0) return;
+      dragRef.current = null; // 自愈：清掉可能残留的旧拖拽态，保证新交互必定可用
       const header = e.target.closest(".board-widget-header");
       if (!header) return;
       const card = header.closest(".board-card");

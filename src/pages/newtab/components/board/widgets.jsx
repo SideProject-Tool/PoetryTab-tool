@@ -135,7 +135,13 @@ const GroupWidgetBase = ({ folder, onOpenFolder, onManage, dragHandle }) => {
         <h3 className="board-widget-title">{folder.title || "未命名"}</h3>
         <div className="board-widget-actions">
           <span className="board-widget-count">{folder.children.length} 项</span>
-          <button type="button" className="board-widget-action" title="管理分组" onClick={() => onManage(folder.id)}>
+          <button
+            type="button"
+            className="board-widget-action"
+            title="管理分组"
+            onPointerDown={(e) => e.stopPropagation()} // ⋯ 与拖拽状态机隔离：点击必然触发，不受任何拖拽残留影响
+            onClick={() => onManage(folder.id)}
+          >
             <MoreIcon className="w-4 h-4" />
           </button>
         </div>
@@ -248,6 +254,7 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
               type="button"
               className="board-widget-action"
               title="小部件操作"
+              onPointerDown={(e) => e.stopPropagation()} // ⋯ 与拖拽状态机隔离
               onClick={() => setMenuOpen((o) => !o)}
             >
               <MoreIcon className="w-4 h-4" />
