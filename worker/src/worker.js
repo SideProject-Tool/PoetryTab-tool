@@ -23,6 +23,7 @@ const FAVICON_TTL = 30 * 24 * 3600; // favicon 代理缓存有效期（秒）
 
 const UID_RE = /^[\w\u4e00-\u9fa5-]{2,32}$/u; // 2-32 位：字母数字下划线连字符汉字
 const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+const usedChallenges = new Set(); // 已消费的登录挑战（防重放；per-isolate 尽力而为，挑战本身 10 分钟过期）
 
 /* ===== per-IP 内存限流（per-isolate 尽力而为：Worker 实例可能在节点间漂移、
    内存不共享，生产可再叠加 Cloudflare WAF / Rate Limiting 规则兜底） ===== */
@@ -218,7 +219,9 @@ async function handleApi(request, env, url) {
     if (!UID_RE.test(uid)) return json({ error: "bad uid" }, 400); // 先过白名单再进 R2 key
     const account = await readAccount(env, uid);
     const ts = Math.floor(Date.now() / 1000);
-    const challenge = `${ts}|${await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}`)}`;
+    const nonce = crypto.getRandomValues(new Uint8Array(8));
+    const nonceHex = toHex(nonce);
+    const challenge = `${ts}|${nonceHex}|${await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}|${nonceHex}`)}`;
     const salt = account ? account.salt : await hmacHex(env.SYNC_TOKEN, `fake-salt|${uid}`);
     return json({ challenge, salt, iter: account ? account.iter : ITER_DEFAULT });
   }
@@ -232,16 +235,22 @@ async function handleApi(request, env, url) {
     const uid = String(b.uid || "").trim();
     if (!UID_RE.test(uid)) return json({ error: "bad uid" }, 400); // 先过白名单再进 R2 key
     const account = await readAccount(env, uid);
-    const m = String(b.challenge || "").match(/^(\d+)\|([0-9a-f]{64})$/);
+    const m = String(b.challenge || "").match(/^(\d+)\|([0-9a-f]{16})\|([0-9a-f]{64})$/);
     if (!m) return json({ error: "bad challenge" }, 400);
     const ts = Number(m[1]);
-    if (timingSafeEq(m[2], await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}`)) === false) {
+    const nonce = m[2];
+    if (timingSafeEq(m[3], await hmacHex(env.SYNC_TOKEN, `c|${uid}|${ts}|${nonce}`)) === false) {
       return json({ error: "bad challenge" }, 400);
     }
     if (Math.floor(Date.now() / 1000) - ts > CHALLENGE_TTL) return json({ error: "challenge expired" }, 400);
+    // 挑战一次性：签发后已消费的直接拒绝（重放防线；per-isolate 尽力而为）
     if (!account) return json({ error: "bad proof" }, 401);
     const expected = await hmacAuthKey(account.authKey, b.challenge);
     if (!timingSafeEq(String(b.proof || ""), expected)) return json({ error: "bad proof" }, 401);
+    // 挑战一次性：已消费的直接拒绝（防截获重放）
+    if (usedChallenges.has(b.challenge)) return json({ error: "bad challenge" }, 400);
+    usedChallenges.add(b.challenge);
+    if (usedChallenges.size > 50000) usedChallenges.clear(); // 防内存膨胀（60s 后挑战本身也过期）
     const obj = await env.BUCKET.get(`pt/data/${uid}.json`);
     let payload = { savedAt: null, data: null };
     if (obj) {

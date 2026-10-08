@@ -144,13 +144,10 @@ export default function App() {
   const poemQuery = poem ? [poem.title, poem.from, poem.who].filter(Boolean).join(" ") : "";
   const poemSearchHref = poemQuery ? engine.url + encodeURIComponent(poemQuery.trim()) : undefined;
 
-  /* 全局搜索数据源：收藏夹全量 + 常用网站 */
+  /* 全局搜索数据源：收藏夹全量（quickSites 已下线，ensureShape 已丢弃） */
   const searchItems = useMemo(() => {
     if (!col.data) return [];
-    return [
-      ...flattenForSearch(col.data.folders || []),
-      ...(col.data.quickSites || []).map((s) => ({ ...s, path: "常用网站" })),
-    ];
+    return flattenForSearch(col.data.folders || []);
   }, [col.data]);
 
   return (

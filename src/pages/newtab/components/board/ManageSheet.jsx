@@ -614,7 +614,11 @@ export default function ManageSheet({ col, target, onClose }) {
           {currentId === s.id && (
             <span
               className="ms-chip-more"
-              onClick={(e) => { e.stopPropagation(); setTreeMenu(treeMenu?.id === s.id ? null : s.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                setTreeMenu(treeMenu?.id === s.id ? null : { id: s.id, anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+              }}
             >
               <MoreIcon className="w-3.5 h-3.5" />
             </span>

@@ -137,7 +137,7 @@ export default function SettingsPanel({ col }) {
 
   /* 卡片显隐候选清单（与看板 widgetDefs 的 id 规则一致） */
   const cards = useMemo(() => {
-    const list = [{ id: "qs:quicksites", title: "常用网站" }];
+    const list = [];
     for (const f of col.data?.folders || []) list.push({ id: "f:" + f.id, title: f.title || "未命名分组" });
     for (const w of col.data?.iframeWidgets || []) list.push({ id: "w:" + w.id, title: w.title || "小部件" });
     return list;

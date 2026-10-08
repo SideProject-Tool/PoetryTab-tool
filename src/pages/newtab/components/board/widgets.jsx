@@ -1,5 +1,5 @@
 /**
- * 看板卡片部件：瓷贴（书签/文件夹）+ 三种卡片（分组 / 常用网站 / iframe 小部件）。
+ * 看板卡片部件：瓷贴（书签/文件夹）+ 两种卡片（分组 / iframe 小部件）。
  * 纯展示 + 回调，布局与拖拽由 BookmarkBoard 编排。
  */
 import { useState, useEffect, useRef, memo } from "react";
@@ -269,10 +269,10 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
                     <div className="widget-menu-divider" />
                   </>
                 )}
-                <button type="button" id="iw-reload" onClick={() => { setReloadKey((k) => k + 1); setMenuOpen(false); }}>
+                <button type="button" id="iw-reload" onClick={() => { setReloadKey((k) => k + 1); setMenu(null); }}>
                   <ReloadIcon className="w-4 h-4" /> 重新加载
                 </button>
-                <button type="button" id="iw-open" onClick={() => { openInNewTab(); setMenuOpen(false); }}>
+                <button type="button" id="iw-open" onClick={() => { openInNewTab(); setMenu(null); }}>
                   <OpenIcon className="w-4 h-4" /> 新窗口打开
                 </button>
                 <button type="button" className="danger" id="iw-remove" onClick={() => { setMenu(null); onRemove(widget.id); }}>
