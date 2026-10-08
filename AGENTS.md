@@ -56,20 +56,60 @@ node scripts/release.mjs [版本号]  # 一键发布：测试→构建→部署�
 node scripts/release.mjs [版本号]     # 版本号可省略（按当前版本发布）；--skip-live-smoke 跳过线上冒烟
 ```
 
-脚本自动执行并设门禁（任一失败立即中止）：
+### 使用方式
 
-1. **版本号**：传参则先写入 `package.json`（必须大于商店在售版本；扩展 manifest 继承它）
-2. **Worker 自测**：`node scripts/test-worker.mjs` 全绿才继续
-3. **双端构建**：`pnpm build` + `pnpm build:web`
-4. **部署**：`./deploy-web.sh`（网页版 + Worker 同批——改了 API 协议/错误码/数据结构时必须同批，新旧混搭会行为错乱）
-5. **线上校验**：抓取线上 HTML 确认已引用本次构建的资产指纹（防止「部署没生效还继续走」）、health 检查
-6. **线上冒烟**：`node scripts/test-auth.mjs`（3 次重试取最好；失败仅告警不中止——网络抖动可能误报，健康+资产校验已证明新版本在线）
-7. **商店包**：`STORE_BUILD=1 pnpm zip` → 解包抽查 manifest（无 `key` 字段、版本正确、permissions 符合预期），任何一项不符即中止
+**参数与选项**：
 
-脚本完成后仍需人工：浏览器手工回归（登录/建分组/拖拽/手机视口/快照，见「改动后验证」）→ git 提交推送 → 商店上传。
+| 用法 | 说明 |
+|---|---|
+| `node scripts/release.mjs 1.4.0` | 常规发版：先把 `1.4.0` 写入 package.json，再走全流程（版本必须大于商店在售版本） |
+| `node scripts/release.mjs` | 不带版本号：按 package.json 当前版本发布（适合「代码已提交、只差部署」的场景） |
+| `node scripts/release.mjs 1.4.0 --skip-live-smoke` | 跳过第 5 步线上冒烟（本机网络不佳时；健康检查+资产校验仍会执行） |
+| 与当前版本相同的版本号会报错中止 | 防止忘改版本直接发布（商店会拒收同版本包）；确要重发同版本请先自行改 package.json |
 
-要点：
-- 本地构建（`pnpm build`）带 key 固定扩展 ID；商店构建剔除 key，由商店重新签名（扩展 ID 与本地不同）
+**典型场景**：
+
+```bash
+# 场景一：功能开发完，发新版本（最常用）
+node scripts/release.mjs 1.4.0
+
+# 场景二：只改了文档/注释，无需升版本，重新部署线上
+node scripts/release.mjs
+
+# 场景三：本机到 Cloudflare 网络不稳（冒烟总失败时）
+node scripts/release.mjs 1.4.1 --skip-live-smoke
+```
+
+**脚本自动执行的内容（按序，任一必需步骤失败立即中止，不会带病发布）**：
+
+1. 版本号写入 package.json（若传参）
+2. Worker 自测：`node scripts/test-worker.mjs` 全绿才继续
+3. 双端构建：`pnpm build` + `pnpm build:web`
+4. 部署：`./deploy-web.sh`（网页版 + Worker 同批；改了 API 协议/错误码/数据结构必须同批，新旧混搭会行为错乱）
+5. **线上校验**：抓取线上 HTML，确认已引用本次构建的资产指纹 + `/api/health` 检查（防止「部署没生效还继续走」）
+6. 线上冒烟：`node scripts/test-auth.mjs`（自动重试 3 次取最好结果）
+7. 商店包：`STORE_BUILD=1 pnpm zip` → 解包抽查 manifest（无 `key`、版本一致、permissions 正确）
+
+**失败处置对照**：
+
+| 中止步骤 | 含义与处置 |
+|---|---|
+| 步骤 1 版本号报错 | 版本格式非法或与当前相同——改一个更大的版本号 |
+| 步骤 2 Worker 测试失败 | 服务端逻辑被改坏，修复后重跑 |
+| 步骤 3/4 构建或部署失败 | 看 gulp/vite/scp 报错输出修复；部署失败不涉及线上（线上保持旧版） |
+| 步骤 5 线上校验失败 | 部署命令成功但线上没更新（权限/缓存/服务器问题）——**禁止继续**，排查 deploy-web.sh |
+| 步骤 6 冒烟告警（不中止） | 大概率本机网络抖动；打开线上站确认可用即可继续上传商店 |
+| 步骤 7 包校验失败 | STORE_BUILD 未生效或 manifest 异常——检查 wxt.config.js 与版本号 |
+
+**脚本完成后仍需人工**（脚本无法替代）：
+
+1. 浏览器手工回归：登录 → 建分组/子分组 → 批量收录 → 拖拽（列内+跨列）→ 390px 手机视口 → 快照列表（见「改动后验证」）
+2. git 提交推送（版本号变更 + 本次发布说明）
+3. 商店上传 zip 并更新权限/数据使用说明（如有变化）
+
+### 要点
+
+- 本地构建（`pnpm build`）带 key 固定扩展 ID；商店构建（脚本内 `STORE_BUILD=1`）剔除 key，由商店重新签名（扩展 ID 与本地不同）
 - 商店审核要点：`bookmarks` 权限需填用途说明（「导入浏览器书签」功能，仅在用户主动点击导入时读取）；数据使用声明如实勾选（收藏数据同步到自有服务器 sync.pathmemos.com，不与第三方共享）；新增权限会触发更严格审核
 - `store/` 目录是商店素材（截图 1280×800、图标）；提交前截图需与当前界面核对，不符则重截
 - **扩展分发**：`pnpm build` 后加载 `.output/chrome-mv3`，或 `pnpm zip` 出包。云同步端点 URL 内置于构建产物（`src/pages/newtab/services/constants.js` 的 `CLOUD_SYNC.url`）；会话令牌为登录后运行时下发（PBKDF2 派生 authKey → 服务器会话令牌，存 localStorage `pt.session`），构建产物中不含任何静态 token。
