@@ -2209,3 +2209,40 @@
 }
 
 /* ===== 管理工作台结束 ===== */
+
+/* ===== 管理工作台：批量选择与移动 ===== */
+.ms-row-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0 1px 0 4px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.ms-row.selected {
+  background: color-mix(in oklab, var(--color-primary) 9%, transparent);
+}
+
+.ms-movebar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
+  border-radius: 0.6rem;
+  background: color-mix(in oklab, var(--color-primary) 5%, transparent);
+  font-size: 0.8rem;
+}
+
+.ms-movebar > span:first-child {
+  flex: 1;
+  opacity: 0.8;
+}
+
+.ms-row-menu.wide {
+  min-width: 13rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
