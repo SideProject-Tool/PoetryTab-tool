@@ -118,16 +118,12 @@ const TileGrid = memo(function TileGrid({ items, onOpenFolder }) {
 
 /* ---------- 三种卡片 ---------- */
 
-/** 分组卡片（子分组 → 标签页；有子分组时隐藏「全部」，直属内容不再展示） */
+/** 分组卡片（子文件夹 → 标签页） */
 const GroupWidgetBase = ({ folder, onOpenFolder, onManage, dragHandle }) => {
   const subs = folder.children.filter((c) => c.children);
   const direct = folder.children.filter((c) => !c.children);
   const [active, setActive] = useState("");
-  /* 有子分组时仅展示子分组标签（active 落在子分组上）；无子分组时展示直属内容 */
-  const activeSub = subs.some((s) => s.id === active) ? active : (subs[0]?.id || "");
-  const items = activeSub
-    ? ((folder.children.find((c) => c.id === activeSub) || {}).children || [])
-    : direct;
+  const items = active ? ((folder.children.find((c) => c.id === active) || {}).children || []) : direct;
 
   return (
     <div className="board-widget">
@@ -142,11 +138,18 @@ const GroupWidgetBase = ({ folder, onOpenFolder, onManage, dragHandle }) => {
       </div>
       {subs.length > 0 && (
         <div className="board-widget-tabs">
+          <button
+            type="button"
+            className={`board-widget-tab ${active === "" ? "active" : ""}`}
+            onClick={() => setActive("")}
+          >
+            全部
+          </button>
           {subs.map((sub) => (
             <button
               key={sub.id}
               type="button"
-              className={`board-widget-tab ${activeSub === sub.id ? "active" : ""}`}
+              className={`board-widget-tab ${active === sub.id ? "active" : ""}`}
               onClick={() => setActive(sub.id)}
             >
               {sub.title || "未命名"}

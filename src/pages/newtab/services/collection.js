@@ -143,41 +143,6 @@ export function reorderItem(data, id, newIndex) {
   return folders ? { ...data, folders } : data;
 }
 
-/** 批量把条目（书签/子分组/常用网站）移动到目标分组的子级首位。
- *  从任意层级剪切、跨分组/子分组移动均可；移动分组进自己的后代会被跳过（防成环）。 */
-export function moveNodesTo(data, ids, folderId) {
-  const idSet = new Set(ids);
-  const out = [];
-  const cut = (list) =>
-    list.reduce((acc, c) => {
-      if (idSet.has(c.id)) {
-        out.push(c);
-        return acc;
-      }
-      acc.push(c.children ? { ...c, children: cut(c.children) } : c);
-      return acc;
-    }, []);
-  const folders = cut(data.folders || []);
-  const quickSites = cut(data.quickSites || []);
-
-  let target = null;
-  const find = (list) => {
-    for (const n of list) {
-      if (n.id === folderId) { target = n; return true; }
-      if (n.children && find(n.children)) return true;
-    }
-    return false;
-  };
-  find(folders);
-  if (!target) return data; // 目标分组不存在
-
-  const containsTarget = (n) => n.id === folderId || (n.children || []).some(containsTarget);
-  const moved = out.filter((n) => !containsTarget(n)); // 跳过会造成成环的项
-  if (!moved.length) return data;
-  target.children = [...moved, ...target.children];
-  return { ...data, folders, quickSites };
-}
-
 /** 展平为搜索用列表：[{item, path}] */
 export function flattenForSearch(folders) {
   const out = [];
