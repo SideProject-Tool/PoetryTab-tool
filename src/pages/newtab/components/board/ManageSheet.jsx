@@ -316,7 +316,8 @@ export default function ManageSheet({ col, target, onClose }) {
 
   const submitSub = () => {
     if (!subDraft.trim()) return;
-    col.addFolder(currentId, subDraft.trim());
+    // 子分组仅一级：无论当前在根还是子分组视图，都创建为根分组下的同级子分组
+    col.addFolder(target.id, subDraft.trim());
     setSubDraft("");
     setSubAdding(false);
   };
@@ -680,7 +681,7 @@ export default function ManageSheet({ col, target, onClose }) {
                 <input
                   className="ms-tree-rename"
                   autoFocus
-                  placeholder="子分组名称，回车创建"
+                  placeholder="子分组名称，回车创建（分组顶层）"
                   value={subDraft}
                   onChange={(e) => setSubDraft(e.target.value)}
                   onKeyDown={(e) => {
