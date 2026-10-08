@@ -212,8 +212,29 @@ export default function ManageSheet({ col, target, onClose }) {
   const [confirmRootDel, setConfirmRootDel] = useState(false);
   const [hint, setHint] = useState("");
   const [browsing, setBrowsing] = useState(null); // 更深层文件夹的浏览浮层
+  /* 批量选择与移动 */
+  const [selected, setSelected] = useState([]);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const moveAnchorRef = useRef(null);
+  useEffect(() => {
+    if (!moveMenuOpen) return;
+    const close = (e) => { if (!moveAnchorRef.current?.contains(e.target)) setMoveMenuOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [moveMenuOpen]);
+  const toggleSelect = (id) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const subfolders = isQs ? [] : (rootNode?.children || []).filter((c) => c.children);
+  /* 批量移动的目标清单：分组面板 = 根分组 + 其子分组；常用网站面板 = 所有顶层分组 */
+  const moveTargets = useMemo(() => {
+    if (isQs) return (col.data?.folders || []).map((f) => ({ id: f.id, title: f.title || "未命名" }));
+    const list = rootNode ? [{ id: rootNode.id, title: rootNode.title || "未命名" }] : [];
+    for (const s of subfolders) list.push({ id: s.id, title: s.title || "未命名" });
+    return list.filter((t) => t.id !== currentId);
+  }, [isQs, rootNode, subfolders, currentId]);
+  /* 切换视图/数据变化时清空选择与预览 */
+  useEffect(() => { setSelected([]); }, [currentId, isQs, items]);
   const subById = useMemo(() => new Map(subfolders.map((s) => [s.id, s])), [subfolders]);
   const atRoot = isQs || currentId === target.id;
 
@@ -439,7 +460,7 @@ export default function ManageSheet({ col, target, onClose }) {
       <div
         key={row.id}
         data-id={row.id}
-        className={`ms-row${dragId === row.id ? " dragging-src" : ""}`}
+        className={`ms-row${dragId === row.id ? " dragging-src" : ""}${selected.includes(row.id) ? " selected" : ""}`}
         onClick={() => {
           if (isFolder) {
             if (atRoot) { setQ(""); setCurrentId(row.id); } // 根下的文件夹 = 子分组：树内导航
@@ -449,6 +470,14 @@ export default function ManageSheet({ col, target, onClose }) {
           }
         }}
       >
+        <input
+          type="checkbox"
+          className="ms-row-check"
+          title="选中以便批量移动"
+          checked={selected.includes(row.id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => toggleSelect(row.id)}
+        />
         <span
           className={`ms-row-handle${q.trim() ? " disabled" : ""}`}
           title="拖动排序"
@@ -756,6 +785,44 @@ export default function ManageSheet({ col, target, onClose }) {
             )}
 
             {hint && <div className="ms-hint">{hint}</div>}
+
+            {/* 批量移动条（选中 ≥1 条时出现） */}
+            {selected.length > 0 && !batchOpen && (
+              <div className="ms-movebar">
+                <span>已选 {selected.length} 条</span>
+                <div className="ms-row-menu-anchor" ref={moveAnchorRef}>
+                  <button
+                    type="button"
+                    className="ms-btn primary"
+                    disabled={!moveTargets.length}
+                    onClick={() => setMoveMenuOpen((o) => !o)}
+                  >
+                    移动到…
+                  </button>
+                  {moveMenuOpen && (
+                    <div className="ms-row-menu wide">
+                      {moveTargets.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            col.moveNodesTo(selected, t.id);
+                            setSelected([]);
+                            setMoveMenuOpen(false);
+                            setHint(`✓ 已移动 ${selected.length} 条到「${t.title}」`);
+                            setTimeout(() => setHint(""), 4000);
+                          }}
+                        >
+                          <FolderIcon className="w-4 h-4" /> {t.title}
+                        </button>
+                      ))}
+                      {!moveTargets.length && <div className="settings-snap-empty">没有可选目标</div>}
+                    </div>
+                  )}
+                </div>
+                <button type="button" className="ms-btn" onClick={() => setSelected([])}>取消选择</button>
+              </div>
+            )}
 
             {/* 列表 */}
             <div className="ms-list" ref={listRef}>
