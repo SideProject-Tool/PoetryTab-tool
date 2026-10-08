@@ -11,6 +11,7 @@ import {
   IoEllipsisHorizontalOutline as MoreIcon,
 } from "react-icons/io5";
 import { openUrl } from "../../../../platform";
+import Popover from "./Popover";
 import { safeUrl } from "../../services/collection";
 import { CLOUD_SYNC } from "../../services/constants";
 
@@ -171,11 +172,10 @@ const GroupWidgetBase = ({ folder, onOpenFolder, onManage, dragHandle }) => {
 /** iframe 小部件卡片：操作收进 ⋯ 菜单；iframe 视口内才挂载（挂载后本页会话内不重载） */
 const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
   const [reloadKey, setReloadKey] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menu, setMenu] = useState(null); // {anchor} ⋯ 菜单（Popover 到 body，脱离卡片裁剪）
   const [mounted, setMounted] = useState(false); // 首次滚入视口后保持 true，避免来回滚动反复重载
   const [hDraft, setHDraft] = useState(null); // 自定义高度草稿（字符串，Enter/失焦提交）
   const bodyRef = useRef(null);
-  const menuRef = useRef(null);
 
   /* 提交自定义高度：钳位 200-2000，非法输入回退当前值 */
   const commitH = () => {
@@ -206,15 +206,6 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
     };
   }, [mounted]);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e) => {
-      if (!menuRef.current?.contains(e.target)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
-
   const openInNewTab = () => {
     const u = safeUrl(widget.url);
     if (u) openUrl(u);
@@ -225,18 +216,23 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
       <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
         <h3 className="board-widget-title">{widget.title}</h3>
         <div className="board-widget-actions">
-          <div className="widget-menu-anchor" ref={menuRef}>
+          <div className="widget-menu-anchor">
             <button
               type="button"
               className="board-widget-action"
               title="小部件操作"
               onPointerDown={(e) => e.stopPropagation()} // ⋯ 与拖拽状态机隔离
-              onClick={() => setMenuOpen((o) => !o)}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                setMenu(menu ? null : { anchor: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+              }}
             >
               <MoreIcon className="w-4 h-4" />
             </button>
-            {menuOpen && (
-              <div className="widget-menu">
+            {menu && (
+              <Popover anchor={menu.anchor} onClose={() => setMenu(null)} minWidth={176}>
+                <div className="widget-menu">
                 {onUpdate && (
                   <>
                     <div className="widget-menu-label">高度（像素，200-2000）</div>
@@ -279,11 +275,12 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
                 <button type="button" id="iw-open" onClick={() => { openInNewTab(); setMenuOpen(false); }}>
                   <OpenIcon className="w-4 h-4" /> 新窗口打开
                 </button>
-                <button type="button" className="danger" id="iw-remove" onClick={() => { setMenuOpen(false); onRemove(widget.id); }}>
+                <button type="button" className="danger" id="iw-remove" onClick={() => { setMenu(null); onRemove(widget.id); }}>
                   <TrashIcon className="w-4 h-4" /> 删除小部件
                 </button>
               </div>
-            )}
+            </Popover>
+          )}
           </div>
         </div>
       </div>
