@@ -187,8 +187,7 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
     });
   };
 
-  /* 懒挂载：几何检测 + 滚动/缩放监听（不用 IntersectionObserver——
-     个别内嵌 webview 不派发其回调，会把部件卡死在占位态） */
+  /* 懒挂载：几何检测 + 滚动/缩放监听 */
   useEffect(() => {
     if (mounted) return;
     const el = bodyRef.current;

@@ -9,7 +9,7 @@
  * - 搜索：按标题/网址过滤当前列表（过滤时暂停拖拽）
  * - 删除：书签即删（底部撤销 toast 兜底）；含内容的子分组需在菜单内二次确认
  *
- * target: {type:"folder", id} | {type:"quicksites"}
+ * target: {type:"folder", id}
  */
 import { useState, useEffect, useRef, useMemo } from "react";
 import {

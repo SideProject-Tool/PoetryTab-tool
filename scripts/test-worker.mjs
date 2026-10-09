@@ -165,16 +165,26 @@ check("重放旧 base 被拒 409", r.status === 409, r.status);
 r = await callApi("/data", { method: "PUT", headers: { Authorization: "Bearer bad|1|xx" }, body: JSON.stringify(dataOf(9)) });
 check("无效会话 401", r.status === 401, r.status);
 
+console.log("— 8MB 上限与 uid 白名单 —");
+r = await callApi("/data", { method: "PUT", headers: H, body: JSON.stringify({ folders: [{ id: "fbig", title: "big", children: [] }], filler: "x".repeat(8 * 1024 * 1024) }) });
+check("超 8MB PUT 413", r.status === 413, r.status);
+r = await callApi("/data", { headers: H });
+check("413 后云端数据未被改动", ((await r.json()).data.folders || [])[0]?.id === "f3", "");
+r = await callApi("/challenge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uid: "a" }) });
+check("challenge 非法 uid 400", r.status === 400, r.status);
+r = await callApi("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uid: "a", challenge: "x", proof: "y" }) });
+check("login 非法 uid 400", r.status === 400, r.status);
+
 console.log("— 快照列表与恢复 —");
 r = await callApi("/snaps", { headers: H });
 const snaps = (await r.json()).snaps;
-check("快照列表非空（≤5）", Array.isArray(snaps) && snaps.length >= 2 && snaps.length <= 5, JSON.stringify(snaps));
+check("5 分钟节流：连续保存合并为一份快照", Array.isArray(snaps) && snaps.length === 1, JSON.stringify(snaps));
 r = await callApi("/snaps", { headers: { Authorization: "Bearer bad|1|xx" } });
 check("快照列表需会话", r.status === 401, r.status);
-const target = snaps[snaps.length - 1]; // 最旧一份
+const target = snaps[0]; // 唯一一份（内容 = 最近一次成功保存 dataOf(3)）
 r = await callApi("/snap/restore", { method: "POST", headers: H, body: JSON.stringify({ key: target.key }) });
 const restored = await r.json();
-check("恢复成功且内容来自该快照", r.status === 200 && restored.data.folders[0].id === "f1", r.status + JSON.stringify(restored).slice(0, 120));
+check("恢复成功且内容为最近一次保存", r.status === 200 && restored.data.folders[0].id === "f3", r.status + JSON.stringify(restored).slice(0, 120));
 check("恢复后 savedAt 为新时刻", restored.savedAt !== target.at, restored.savedAt);
 r = await callApi("/snap/restore", { method: "POST", headers: H, body: JSON.stringify({ key: "pt/data/other-uid/snap-1-xx.json" }) });
 check("恢复他人/不存在快照 404", r.status === 404, r.status);

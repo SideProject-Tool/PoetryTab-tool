@@ -6,12 +6,6 @@ export const FONTNAME_LIST = [
   "JXZhuoKai",
 ];
 
-export const FONT_DISPLAY_NAMES = {
-  JXZhuoKai: "江西拙楷",
-};
-
-export const POEM_MAXLINELENGTH = 23;
-
 export const CLOUD_SYNC = {
   url: "https://sync.pathmemos.com",
 };

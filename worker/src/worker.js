@@ -2,8 +2,9 @@
 // 存储：R2 桶（绑定名 BUCKET）
 //   pt/accounts/<uid>.json             账号记录 {v, iter, salt, authKey, createdAt}
 //   pt/data/<uid>.json                 最新数据 {savedAt, data}
-//   pt/data/<uid>/snap-<ts>-<seq>.json 历史快照（保留最近 5 份，可经 /api/snap* 恢复）
+//   pt/data/<uid>/snap-<ts>-<rand>.json 历史快照（保留最近 5 份；5 分钟内连续保存合并为一份，可经 /api/snap* 恢复）
 //   pt/favicons/<domain>.bin           favicon 代理缓存（元数据存 contentType）
+//   pt/titles/<hash>.json              网页标题代理缓存（30 天）
 // 认证（客户端全程不发送明文密码）：
 //   注册：客户端 PBKDF2-SHA256(密码, 随机盐, iter) → authKey，连同盐提交，服务器只存派生结果
 //   登录：/api/challenge 发放带签名的一次性挑战（含盐与迭代次数）→ 客户端 HMAC-SHA256(authKey, challenge) 应答
@@ -164,17 +165,23 @@ async function writeDataCAS(env, uid, data, prev) {
   return { conflict: false, savedAt, payload };
 }
 
-/* 快照轮转尽力而为：主数据已写成功，快照失败仅记日志、不影响本次保存结果
-   （否则快照异常返 5xx，客户端重试会撞乐观锁） */
+/* 快照轮转（尽力而为：主数据已写成功，快照失败仅记日志、不影响本次保存结果
+   ——否则快照异常返 5xx，客户端重试会撞乐观锁）。
+   5 分钟节流：距最新一份快照不足 5 分钟则覆盖它（连续自动保存合并为一份，避免烧光历史），
+   之后统一轮转只保留最近 KEEP_SNAPS 份 */
+const SNAP_MIN_INTERVAL = 5 * 60 * 1000;
 async function rotateSnapshot(env, uid, payload) {
   try {
-    const snapKey = `pt/data/${uid}/snap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-    await env.BUCKET.put(snapKey, payload);
-    const snaps = await env.BUCKET.list({ prefix: `pt/data/${uid}/snap-` });
-    const sorted = (snaps.objects || []).sort(
-      (a, b) => (b.uploaded ? b.uploaded.getTime() : 0) - (a.uploaded ? a.uploaded.getTime() : 0)
-    );
-    for (const old of sorted.slice(KEEP_SNAPS)) {
+    const prefix = `pt/data/${uid}/snap-`;
+    const byNewest = (a, b) => (b.uploaded ? b.uploaded.getTime() : 0) - (a.uploaded ? a.uploaded.getTime() : 0);
+    const snaps = (await env.BUCKET.list({ prefix })).objects || [];
+    snaps.sort(byNewest);
+    if (snaps.length && Date.now() - (snaps[0].uploaded ? snaps[0].uploaded.getTime() : 0) < SNAP_MIN_INTERVAL) {
+      await env.BUCKET.delete(snaps[0].key);
+      snaps.shift();
+    }
+    await env.BUCKET.put(`${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`, payload);
+    for (const old of snaps.slice(KEEP_SNAPS - 1)) {
       await env.BUCKET.delete(old.key);
     }
   } catch (e) {
@@ -243,14 +250,13 @@ async function handleApi(request, env, url) {
       return json({ error: "bad challenge" }, 400);
     }
     if (Math.floor(Date.now() / 1000) - ts > CHALLENGE_TTL) return json({ error: "challenge expired" }, 400);
-    // 挑战一次性：签发后已消费的直接拒绝（重放防线；per-isolate 尽力而为）
+    // 挑战一次性：签发后已消费的直接拒绝（防截获重放；per-isolate 尽力而为，挑战本身 10 分钟过期）
+    if (usedChallenges.has(b.challenge)) return json({ error: "bad challenge" }, 400);
     if (!account) return json({ error: "bad proof" }, 401);
     const expected = await hmacAuthKey(account.authKey, b.challenge);
     if (!timingSafeEq(String(b.proof || ""), expected)) return json({ error: "bad proof" }, 401);
-    // 挑战一次性：已消费的直接拒绝（防截获重放）
-    if (usedChallenges.has(b.challenge)) return json({ error: "bad challenge" }, 400);
     usedChallenges.add(b.challenge);
-    if (usedChallenges.size > 50000) usedChallenges.clear(); // 防内存膨胀（60s 后挑战本身也过期）
+    if (usedChallenges.size > 50000) usedChallenges.clear(); // 防内存膨胀（挑战 10 分钟后本身过期）
     const obj = await env.BUCKET.get(`pt/data/${uid}.json`);
     let payload = { savedAt: null, data: null };
     if (obj) {

@@ -7,7 +7,7 @@ import {
 } from "react-icons/io5";
 
 export default function GateScreen({ col, containerRef }) {
-  const [gateMsg, setGateMsg] = useState(""); // 引导门提示（自动生成 ID 等）
+  const [gateMsg, setGateMsg] = useState(""); // 引导门提示（登录/注册结果）
 
   let gatePrefill = "";
   try { gatePrefill = sessionStorage.getItem("gatePrefillUid") || ""; } catch {}

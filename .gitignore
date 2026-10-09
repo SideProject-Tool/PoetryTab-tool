@@ -11,19 +11,11 @@
 # 依赖
 node_modules
 
-# 环境变量和密码
-.env.submit
-/components/tts.js
-
 # AI assistance workflows
 .agents/
-release/
 
 # Web 构建产物
 dist-web
-
-# 浏览器配置文件目录（截图探针产物）
-store/pw-*
 
 # 开发用私钥（稳定扩展 ID 用，不入库）
 assets/dev-key.pem

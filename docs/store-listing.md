@@ -11,9 +11,11 @@
 | 文件 | 用途 |
 |---|---|
 | `.output/poetrytab-tool-<版本>-chrome.zip`（由 `STORE_BUILD=1 pnpm zip` 生成，约 3.3MB） | Chrome Web Store 与 Edge Add-ons 共用上传包（MV3，无 key） |
-| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（1280×800）⚠️ 提交前与当前界面核对，不符则重截 |
+| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（1280×800）⚠️ 现存 chrome/edge 两张截图均为旧版界面，**需重截** |
 | `store/screenshot-edge-1080x680.png` | Edge 商店截图（1080×680）⚠️ 同上 |
 | `store/logo-edge-300x300.png` | Edge 商店 Logo（300×300） |
+
+Chrome Web Store 扩展 ID：本地开发构建经 manifest `key` 固定 ID 用于开发调试；**商店包剔除 key，由商店签名分配 ID（与本地不同，以上传后分配为准）**。
 
 提交前抽查 zip 内 manifest：**无 `key` 字段**、版本正确、`permissions: ["bookmarks"]`、host 权限仅 `https://sync.pathmemos.com/*`。
 
@@ -52,22 +54,22 @@
 Poetry-Tab 把古诗词和你的收藏，装进每一个新标签页。
 
 📜 每日诗词
-打开新标签页即见一首中国古诗词，覆盖诗词、文学、哲学、影视等 12 个分类，点击换一首，一键查询出处。
+打开新标签页默认呈现中国古诗词；可在设置中启用文学、哲学、影视、网易云等共 12 类内容，点击换一首，一键查询出处。
 
 🗂 收藏看板
-列式看板：卡片拖动即可列内排序、跨列移动；分组支持二级子分组（标签页展示）；常用网站一卡直达；iframe 小部件把任意网站嵌入新标签页（高度四档可调）。
+列式看板：卡片拖动即可列内排序、跨列移动；分组支持一级子分组（标签页展示）；iframe 小部件把任意网站嵌入新标签页（高度可调）。
 
 📥 一键导入与批量收录
 导入浏览器书签（自动去重）；管理面板多行批量录入；标题留空自动获取网页名称。
 
 🔍 搜索
-搜索自己的收藏，支持拼音与首字母（weibo → 新浪微博）；按 1-9 数字键直达常用网站。
+搜索自己的收藏，支持拼音与首字母（weibo → 新浪微博）；没有收藏结果时回车直接网页搜索。
 
 ☁️ 云同步
 一个用户 ID 走天下：浏览器扩展与网页版（sync.pathmemos.com）共享同一份收藏，自动保存、5 份历史快照可恢复、JSON 备份导出。误删 6 秒内可撤销。
 
 ✨ 其他
-深色 / 浅色 / 跟随系统主题；百度 / Google / Bing / DuckDuckGo；无广告、无追踪，数据存放在你自己的云端空间。
+深色 / 浅色 / 跟随系统主题；百度 / Google / Bing / DuckDuckGo；无广告、无追踪，数据仅存于本服务运营的 Cloudflare 存储，不与第三方共享。
 
 官网与网页版：https://sync.pathmemos.com
 ```
@@ -89,8 +91,8 @@ Poetry-Tab 把古诗词和你的收藏，装进每一个新标签页。
 - [ ] `node scripts/test-worker.mjs` 全绿；`pnpm build && pnpm build:web` 通过；双端手工回归
 - [ ] `STORE_BUILD=1 pnpm zip` 生成的包解包抽查：无 key、版本正确、permissions 符合预期
 - [ ] 隐私权页权限说明与实际权限一致（bookmarks / host）
-- [ ] 截图为当前版本界面（列式看板上线后需重截 1280×800 / 1080×680）
-- [ ] 隐私政策页已上线且内容与当前数据处理一致
+- [ ] 截图为当前版本界面（现存 `store/` 截图为旧版界面，上传前需重截 1280×800 / 1080×680）
+- [ ] 隐私政策页已上线且内容与当前数据处理一致；数据删除渠道已在页内载明（邮件申请，见 `public/privacy.html`）
 
 ## 四、需要你完成的认证/操作
 

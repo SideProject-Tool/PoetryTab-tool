@@ -64,7 +64,6 @@ export function mergeImportedTree(tree, sink) {
       }
     };
     walk(d.folders);
-    for (const s of d.quickSites || []) if (s.url) seen.add(norm(s.url));
     return seen;
   };
   return (d) => {

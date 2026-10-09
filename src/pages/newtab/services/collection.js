@@ -68,7 +68,7 @@ export function addChildToFolder(data, folderId, item) {
 }
 
 export function updateItem(data, itemId, patch) {
-  // 全层递归：条目可能在任意深度的子分组内（此前只查两层，深层书签编辑保存不上）
+  // 全层递归：条目可能在任意深度的子分组内
   const map = (children) =>
     children.map((c) => {
       if (c.id === itemId) return { ...c, ...patch };
@@ -82,32 +82,6 @@ export function removeItem(data, itemId) {
   const cut = (children) =>
     children.filter((c) => c.id !== itemId).map((c) => (c.children ? { ...c, children: cut(c.children) } : c));
   return { ...data, folders: cut(data.folders) };
-}
-
-/** 在同级列表（书签/子文件夹所在的分组，或常用网站）中上移/下移；dir: -1 上移，1 下移；不可移动时返回原引用 */
-export function moveItem(data, itemId, dir) {
-  const shift = (list) => {
-    const idx = list.findIndex((c) => c.id === itemId);
-    if (idx < 0) return null;
-    const to = idx + dir;
-    if (to < 0 || to >= list.length) return null;
-    const next = [...list];
-    next.splice(to, 0, next.splice(idx, 1)[0]);
-    return next;
-  };
-  const walk = (children) => {
-    const moved = shift(children);
-    if (moved) return moved;
-    for (const c of children) {
-      if (c.children) {
-        const sub = walk(c.children);
-        if (sub) return children.map((x) => (x.id === c.id ? { ...x, children: sub } : x));
-      }
-    }
-    return null;
-  };
-  const folders = walk(data.folders || []);
-  return folders ? { ...data, folders } : data;
 }
 
 /** 在同级列表中把条目移动到任意位置（管理面板拖拽排序用）；不可移动时返回原引用 */
@@ -136,7 +110,7 @@ export function reorderItem(data, id, newIndex) {
   return folders ? { ...data, folders } : data;
 }
 
-/** 批量把条目（书签/子分组/常用网站）移动到目标分组的子级首位。
+/** 批量把条目（书签/子分组）移动到目标分组的子级首位。
  *  从任意层级剪切、跨分组/子分组移动均可；移动分组进自己的后代会被跳过（防成环）。 */
 export function moveNodesTo(data, ids, folderId) {
   const idSet = new Set(ids);

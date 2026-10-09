@@ -32,7 +32,7 @@ export default function BookmarkBoard({ col }) {
   /* 回调 ref 持有容器元素：登录门/加载态与看板主渲染是不同 DOM 元素，元素替换时重挂观察器 */
   const [boardEl, setBoardEl] = useState(null);
   const [width, setWidth] = useState(0);
-  const [manage, setManage] = useState(null); // {type:"folder",id} | {type:"quicksites"}
+  const [manage, setManage] = useState(null); // {type:"folder",id}
   const [browsing, setBrowsing] = useState(null); // folderId
   const [fabOpen, setFabOpen] = useState(false);
   const [modal, setModal] = useState(null); // "group" | "widget"
@@ -48,18 +48,10 @@ export default function BookmarkBoard({ col }) {
     });
     ro.observe(boardEl);
     measure();
-    // 兜底：个别内嵌 webview 会停发 RO 回调甚至 window resize，matchMedia 断点事件独立派发
     window.addEventListener("resize", measure);
-    const mqs = [640, 760, 980, 1200].map((px) => {
-      const mq = window.matchMedia(`(min-width: ${px}px)`);
-      const handler = () => measure();
-      mq.addEventListener?.("change", handler);
-      return { mq, handler };
-    });
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
-      for (const { mq, handler } of mqs) mq.removeEventListener?.("change", handler);
     };
   }, [boardEl]);
 

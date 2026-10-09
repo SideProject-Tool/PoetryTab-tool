@@ -20,6 +20,8 @@
   <img src="preview/home.png" alt="新标签页总览" width="720" />
 </p>
 
+<p align="center"><sub>截图为早期版本界面，仅作示意；功能以文字描述为准</sub></p>
+
 ---
 
 ## ✨ 功能特性
@@ -31,19 +33,17 @@
 - 超长诗句单行展示，超出自动省略号截断，页面高度恒定不跳动
 
 ### 🔍 智能搜索框
-- **搜索自己的收藏**：输入即匹配分组/书签/常用网站，显示所在路径
+- **搜索自己的收藏**：输入即匹配书签标题、网址与所在分组路径
 - **拼音与首字母**：`weibo` 命中「新浪微博」、`blbl` 命中「哔哩哔哩」（pinyin-pro 按需加载）
-- **搜索引擎直达**：百度 / Google / Bing / DuckDuckGo 随设置切换
+- **搜索引擎可配置**：百度 / Google / Bing / DuckDuckGo，用于诗词「🔍 查出处」跳转；收藏无命中时回车直达网页搜索
 - 默认隐藏给诗词留白：`S` 呼出、`Esc` 收起、右上角 🔍 开关
-- **数字键直达**：按 `1-9` 直接打开常用网站前 9 个
 
 ### 🗂 收藏看板（核心）
 <p align="center">
   <img src="preview/board.png" alt="收藏看板" width="640" />
 </p>
 
-- **常用网站**：高频站点单独一张卡片（favicon 经同步服务代理，国内可达）
-- **分组书签**：自建分组，卡片内书签磁贴铺开完整可见；**支持二级子分组**（卡片内标签页展示，管理面板可创建/进入）；**批量收录**（多行文本一行一条）；**名称留空自动取网页标题**（服务端代理）
+- **分组书签**：自建分组，卡片内书签磁贴铺开完整可见；**支持一级子分组**（卡片内标签页展示，管理工作台可创建/进入）；**批量收录**（多行文本一行一条）；**名称留空自动取网页标题**（服务端代理）
 - **iframe 小部件**：把任意网站直接内嵌进新标签页（监控面板、文档站、日历……）；视口内才加载、会话内不重载，操作收进 ⋯ 菜单（高度预设档位或自定义像素值，随账号同步）
 - **一键导入浏览器书签**：扩展端直接读浏览器书签树；网页版导入导出的书签 HTML（重复网址自动跳过）
 - **误删无忧**：删除书签/分组/小部件后 6 秒内可一键撤销
@@ -64,19 +64,17 @@
 设置面板为居中弹窗，分三个标签页：
 | 标签页 | 内容 |
 |---|---|
-| 外观 | 主题、搜索引擎、看板列数、**诗词区留白**、展示类别、**页面底色**（预设色板+自定义色号）、**卡片显隐** —— 全部直选直显 |
-| 云同步 | 用户 ID + 密码登录、上传到云端、从云端恢复、退出登录 |
+| 外观 | 主题、搜索引擎、看板列数、**诗词区留白**、展示类别、**页面底色**（浅色/深色两套预设+自定义色号）、**卡片显隐** —— 全部直选直显 |
+| 云同步 | 用户 ID（输入新 ID 回车切换登录）、上传到云端、从云端恢复、打开网页版、退出登录 |
 | 导入与备份 | 导入浏览器书签 / 书签 HTML、导出 / 恢复 JSON 备份、历史版本快照恢复 |
 
 ---
 
 ## 🚀 快速开始
 
-### 方式一：Chrome 扩展
-1. 下载发布包并解压（或自行构建，见[开发](#-开发)）
-2. 打开 `chrome://extensions` → 右上角开启「开发者模式」
-3. 「加载已解压的扩展程序」→ 选择本目录
-4. 新开一个标签页即可使用
+### 方式一：浏览器扩展
+1. 上架后从 Chrome Web Store / Edge Add-ons 安装（商店链接待上架后补充）
+2. 也可自行构建加载：`pnpm build` → 打开 `chrome://extensions` 开启「开发者模式」→「加载已解压的扩展程序」→ 选择 `.output/chrome-mv3`
 
 ### 方式二：网页版（免安装）
 直接访问 **https://sync.pathmemos.com**，与扩展共用同一套云数据。
@@ -128,68 +126,18 @@
 └───────────────────────────────────────────────┘
 ```
 
-**技术栈**：WXT 0.20 · React 19 · Vite 7 · Tailwind CSS 4 · daisyUI 5 · dnd-kit · Cloudflare Workers + R2
+**技术栈**：WXT 0.20 · React 19 · Vite 7 · Tailwind CSS 4 · daisyUI 5 · Cloudflare Workers + R2
 
 ---
 
-## ☁️ 云端数据契约
+## ☁️ 云端数据契约（摘要）
 
-存储（R2 桶，Worker 绑定名 `BUCKET`）：
-- `pt/accounts/<uid>.json` —— 账号记录 `{v, iter, salt, authKey, createdAt}`
-- `pt/data/<uid>.json` —— 最新数据 `{savedAt, data}`
-- `pt/data/<uid>/snap-<ts>-<seq>.json` —— 历史快照（保留最近 5 份）
+**完整规格以 [docs/sync-and-data.md](docs/sync-and-data.md) 为唯一权威**（账号认证、同步状态机、快照、缓存、字段/默认值/枚举全表），此处仅保留公开摘要。
 
-**账号与会话**（密码永不明文传输/存储）：
-- 注册：客户端生成随机盐 → PBKDF2-SHA256(密码, 盐, 600k 迭代) 得 authKey 提交，服务端只存派生结果（R2 条件写保证并发同名注册不互相覆盖）
-- 登录：`POST /api/challenge` 领取带签名的一次性挑战（附盐与迭代次数）→ 客户端重派生 authKey，以 HMAC-SHA256(authKey, challenge) 应答；**不存在的 ID 返回确定性伪盐**（响应形状一致，防账号枚举），登录失败统一提示「ID 或密码不匹配」
-- 会话：登录成功发放无状态令牌 `uid|exp|HMAC(SYNC_TOKEN, uid|exp)`，30 天有效；此后数据读写仅凭令牌（`Authorization: Bearer`），uid 从令牌解析，杜绝越权
-
-**API**（`/api/register`、`/api/challenge`、`/api/login` 无需令牌但有 per-IP 限流；其余需会话令牌）：
-- `POST /api/register` `{uid, salt, authKey, iter}` → `{session}`
-- `POST /api/challenge` `{uid}` → `{challenge, salt, iter}`
-- `POST /api/login` `{uid, challenge, proof}` → `{session, savedAt, data}`
-- `GET /api/data` → `{savedAt, data}`；携带 `If-None-Match`（上次 savedAt）命中返回 **304**，开新标签页零流量
-- `PUT /api/data` 整体写入（≤8MB），携带 `X-Base-SavedAt` 乐观锁：服务端以 **R2 条件写（onlyIf etag）原子完成「校验+写入」**，并发写只成功一个，其余 409；成功后自动轮转快照
-- `GET /api/snaps` → `{snaps: [{key, at}]}`（最近 5 份快照）
-- `POST /api/snap/restore` `{key}` → 恢复该快照为当前数据（恢复动作也留快照）
-- `GET /api/favicon?domain=` → favicon 代理（R2 缓存 30 天，Google s2 → DuckDuckGo 兜底）
-- CORS 白名单含 `X-Base-SavedAt` / `If-None-Match`，本地开发与跨源环境可用完整 API
-
-**数据格式**（`pt/data/<uid>.json` 的 `data` 字段，`v` 为 schema 版本号）：
-
-```jsonc
-{
-  "v": 1,                          // schema 版本（结构迁移用）
-  "folders": [                      // 分组（顶层卡片）
-    {
-      "id": "f_xxx",
-      "title": "AI 工具",
-      "children": [                  // 书签；子分组则含 children（卡片内变标签页）
-        { "id": "b_xxx", "title": "ChatGPT", "url": "https://chat.openai.com", "favicon": "", "dateAdded": 0 }
-      ]
-    }
-  ],
-  "quickSites": [                   // 常用网站卡片
-    { "id": "qs_xxx", "title": "GitHub", "url": "https://github.com", "favicon": "" }
-  ],
-  "iframeWidgets": [                // iframe 内嵌小部件卡片（h = 卡片高度，⋯ 菜单可调，云端同步）
-    { "id": "iw_xxx", "title": "example", "url": "https://example.com", "h": 420 }
-  ],
-  "settings": {                     // 同步的设置
-    "theme": "sync",                // sync | light | dark
-    "engine": "baidu",              // baidu | google | bing | duckduckgo
-    "cats": ["i"]                   // 启用的诗词分类
-  },
-  "layout": {                       // 看板布局（v2 列式）：固定 5 槽位，各槽为卡片 id 的有序数组
-    "v": 2,
-    "cols": [["qs:quicksites", "f:f_xxx"], ["w:iw_xxx"], [], [], []]
-    // 设备按自身列数（设置 2-5 或自动 5/4/3/2）取前 N 列，溢出槽位并入末列；
-    // 手机（<640px）单列按「列序 × 列内序」排列；旧版 v1 显式坐标加载时自动迁移
-  }
-}
-```
-
-> 并发 PUT 由服务端 R2 条件写原子仲裁：同版本只有一次写入成功，后到者收 409 进入客户端仲裁流程（本地未修改自动载入云端；有修改则明确二选一）。
+- 存储（Cloudflare R2，Worker 绑定名 `BUCKET`）：`pt/accounts/<uid>.json` 账号派生凭据 · `pt/data/<uid>.json` 最新数据（`{savedAt, data}`）· `pt/data/<uid>/snap-*.json` 历史快照（保留最近 5 份）
+- 账号 = 自设 ID + 密码：密码只在本地经 PBKDF2（600k 迭代）派生，以挑战应答方式登录，**明文永不上传**；会话为 30 天无状态令牌（`Authorization: Bearer`），uid 从令牌解析，杜绝越权
+- API：`POST /api/register` / `/api/challenge` / `/api/login`（免令牌、per-IP 限流）· `GET/PUT /api/data`（`X-Base-SavedAt` 乐观锁，8MB 上限超限 413，GET 支持 ETag → 304）· `GET /api/snaps`、`POST /api/snap/restore`（快照）· `GET /api/favicon?domain=`、`GET /api/title?url=`（代理）· `GET /api/health`
+- 数据为**整份覆盖**模型：并发 PUT 由服务端 R2 条件写原子仲裁，后到者 409 进入客户端强制仲裁（完整规则见 sync-and-data「同步状态机」）
 
 ---
 
@@ -204,19 +152,13 @@ pnpm build:web      # 构建网页版 → dist-web
 pnpm zip            # 打包扩展 zip
 ```
 
-**目录结构**：
+**目录结构**（逐文件职责见 docs/architecture.md「模块职责」）：
 ```
 ├── entrypoints/newtab/     # 扩展新标签页入口（WXT）
-├── src/pages/newtab/       # 双端共享的 React 应用（核心代码）
-│   ├── App.jsx             # 页面组装：诗词 → 搜索 → 看板 → 设置
-│   ├── components/         # BookmarkBoard（看板编排）/ BookmarkSearch / SettingsPanel
-│   │   └── board/          # 看板子模块：layoutEngine / widgets / ManageSheet / FolderBrowser / GateScreen
-│   ├── hooks/              # useCollection（云数据层）/ useContentEngine（诗词引擎）
-│   ├── services/           # collection（数据契约）/ contentEngine（诗词源）/ bookmarks（书签导入）/ meta（标题代理）
-│   └── grid.js             # 列数常量与自适应
+├── src/pages/newtab/       # 双端共享的 React 应用（App / components+board / hooks / services / grid.js）
+├── src/platform.js         # 平台适配层（扩展 vs 网页宿主差异）
 ├── worker/src/worker.js    # 同步 API（部署源）
-├── web/                    # 网页版入口
-├── vite.web.config.mjs     # 网页版构建配置
+├── web/                    # 网页版入口（vite.web.config.mjs 构建配置）
 ├── assets/fonts/           # 江西拙楷字体
 ├── docs/                   # 业务文档（产品手册 / 同步与数据 / 架构 / 商店上架）
 └── preview/                # README 截图
@@ -225,24 +167,19 @@ pnpm zip            # 打包扩展 zip
 **测试**：
 - Worker 本地自测（无需部署，R2 内存模拟）：`node scripts/test-worker.mjs` —— 注册/防枚举/ETag/CAS/快照恢复/favicon/title/CORS 全量断言
 - 线上协议冒烟：`node scripts/test-auth.mjs`
-- E2E 自动化暂缺；浏览器手工回归要点见 AGENTS.md「改动后验证」
+- 浏览器手工回归要点见 AGENTS.md「改动后验证」
 
 ---
 
 ## 🚢 部署
 
-### 网页版 + 同步服务（Cloudflare）
-```bash
-pnpm build:web
-# 将 dist-web 与 worker 源码同步到构建机后：
-wrangler deploy        # 详见 worker 目录的 wrangler.toml（路由、R2 绑定、token secret）
-```
-- 域名 `sync.pathmemos.com` 绑定为 Worker 自定义域
-- `SYNC_TOKEN` 为服务端 HMAC 密钥（会话令牌与登录挑战签名），通过 `wrangler secret put` 配置，绝不下发前端
+- **网页版 + 同步服务**：`./deploy-web.sh` 一条命令完成（构建 dist-web → 同步构建机 → 服务器 wrangler deploy）
+- **一键发布**（测试 → 构建 → 部署 → 线上校验 → 冒烟 → 商店包，任一步失败即中止）：`node scripts/release.mjs [版本号]`；完整流程与失败处置见 `AGENTS.md`「发版与商店提交」
+- `SYNC_TOKEN` 为服务端 HMAC 密钥（会话令牌与登录挑战签名），配置于部署机，绝不下发前端
 
 ### 扩展分发
 - `pnpm build` 后加载 `.output/chrome-mv3`，或 `pnpm zip` 出分发包
-- 云同步 token 已内置于构建产物中，分发即用
+- 云同步端点 URL 内置于构建产物（`src/pages/newtab/services/constants.js` 的 `CLOUD_SYNC.url`）；会话令牌为登录后运行时下发（PBKDF2 派生 → 服务器会话令牌，存 localStorage），构建产物不含任何静态 token
 
 ---
 

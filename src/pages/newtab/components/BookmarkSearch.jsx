@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useMemo } from "react";
 
 
 /**
- * 全局收藏搜索：实时过滤全部书签与常用网站。
+ * 全局收藏搜索：实时过滤全部分组内书签。
  * 支持拼音全拼/首字母匹配（gh → GitHub、wb → 微博；pinyin-pro 按需加载，不进主包）。
  * Enter 打开选中项（打开后清空关键词便于连续跳转），↑↓ 切换，Esc 清空；Ctrl+点击 新标签打开
  */
 import { openUrl } from "../../../platform";
 import { safeUrl } from "../services/collection";
+import { SEARCH_ENGINES } from "../services/constants";
 
 const PALETTE = ["#c96f5e", "#7b9e56", "#5e89c9", "#b0785e", "#8a6fc9", "#c95e8a", "#5eb0a5", "#c9a35e"];
 function paletteColor(str) {
@@ -16,7 +17,7 @@ function paletteColor(str) {
   return PALETTE[Math.abs(h) % PALETTE.length];
 }
 
-export default function BookmarkSearch({ items = [] }) {
+export default function BookmarkSearch({ items = [], engine = SEARCH_ENGINES.baidu }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [pinyinFns, setPinyinFns] = useState(null); // { pinyin } 懒加载后的模块
@@ -85,6 +86,14 @@ export default function BookmarkSearch({ items = [] }) {
     setQuery(""); // 打开后清空关键词，便于连续跳转多个结果
   };
 
+  /* 收藏无命中：回车/点提示行 → 用当前设置的搜索引擎网页搜索（新标签打开，保留看板页） */
+  const webSearch = () => {
+    const q = query.trim();
+    if (!q) return;
+    openUrl(engine.url + encodeURIComponent(q));
+    setQuery("");
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -94,7 +103,8 @@ export default function BookmarkSearch({ items = [] }) {
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      openItem(results[activeIndex] || results[0], e.ctrlKey || e.metaKey);
+      if (results.length) openItem(results[activeIndex] || results[0], e.ctrlKey || e.metaKey);
+      else webSearch();
     } else if (e.key === "Escape") {
       setQuery("");
       inputRef.current?.blur();
@@ -153,6 +163,15 @@ export default function BookmarkSearch({ items = [] }) {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* 无命中提示行：回车或点击直达网页搜索 */}
+      {query.trim() && results.length === 0 && (
+        <div className="bookmark-search-dropdown">
+          <button type="button" className="bookmark-search-row" onClick={webSearch}>
+            <span className="bt-label">没有匹配的收藏 — 回车用 {engine.label} 搜索「{query.trim()}」</span>
+          </button>
         </div>
       )}
     </div>

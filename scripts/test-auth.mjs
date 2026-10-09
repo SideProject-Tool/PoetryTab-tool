@@ -12,7 +12,7 @@ async function hmac(keyHex, msg) {
   const key = await crypto.subtle.importKey("raw", unhex(keyHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return hex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
 }
-const uid = "e2e-v4-" + Math.random().toString(36).slice(2, 7);
+const uid = "e2e-" + Math.random().toString(36).slice(2, 7);
 const password = "test-pass-9";
 const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
 const authKey = await pbkdf2(password, salt, 600000);
@@ -81,9 +81,9 @@ check("无会话 401", r.status === 401);
 r = await fetch(BASE + "/api/data", { headers: { Authorization: `Bearer ${uid}|9999999999|deadbeef` } });
 check("伪造会话 401", r.status === 401);
 
-// 9. 不存在的 ID 挑战 404
+// 9. 不存在的 ID：挑战返回 200 + 确定性伪盐（防枚举，响应形状与存在时一致）
 r = await post("/api/challenge", { uid: "no-such-id-zzz" });
-check("不存在 ID 404", r.status === 404);
+check("不存在 ID 挑战 200+伪盐", r.status === 200 && /^[0-9a-f]{64}$/.test((r.json && r.json.salt) || ""), JSON.stringify(r.json).slice(0, 80));
 
 // 10. 非法 ID 注册被拒
 r = await post("/api/register", { uid: "a", salt, authKey, iter: 600000 });

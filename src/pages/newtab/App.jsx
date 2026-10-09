@@ -10,7 +10,7 @@ import { flattenForSearch, safeUrl } from "./services/collection";
 import { openUrl } from "../../platform";
 import { IoSearchOutline as SearchIcon, IoCloseOutline as CloseIcon } from "react-icons/io5";
 
-/* 渲染异常兜底：数据损坏时给出可操作的恢复入口，避免整页白屏（每次开新标签页都复现） */
+/* 渲染异常兜底：数据损坏时给出可操作的恢复入口，避免整页白屏 */
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -144,7 +144,7 @@ export default function App() {
   const poemQuery = poem ? [poem.title, poem.from, poem.who].filter(Boolean).join(" ") : "";
   const poemSearchHref = poemQuery ? engine.url + encodeURIComponent(poemQuery.trim()) : undefined;
 
-  /* 全局搜索数据源：收藏夹全量（quickSites 已下线，ensureShape 已丢弃） */
+  /* 全局搜索数据源：分组内全部书签（含所在分组路径） */
   const searchItems = useMemo(() => {
     if (!col.data) return [];
     return flattenForSearch(col.data.folders || []);
@@ -199,7 +199,7 @@ export default function App() {
       {searchOpen && (
         <div className="pc-search-overlay" onClick={() => setSearchOpen(false)}>
           <div className="pc-toolbar" onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }} onClick={(e) => e.stopPropagation()}>
-            <BookmarkSearch items={searchItems} />
+            <BookmarkSearch items={searchItems} engine={engine} />
           </div>
         </div>
       )}
@@ -212,13 +212,17 @@ export default function App() {
       {/* 设置面板（右上角 ⚙，与搜索按钮并排） */}
       <SettingsPanel col={col} />
 
-      {/* 保存状态徽标：失败/冲突时轻提示（conflict 需在设置面板手动选择上传/恢复） */}
+      {/* 保存状态徽标：失败/冲突时轻提示（conflict 需在设置面板手动选择上传/恢复；413 超限如实提示不再重试） */}
       {(col.saveState === "error" || col.saveState === "conflict") && (
         <div
           className={`sync-badge${col.saveState === "conflict" ? " conflict" : ""}`}
           title={col.error || ""}
         >
-          {col.saveState === "conflict" ? "云端有更新 · 本地未同步" : "未同步 · 自动重试中"}
+          {col.saveState === "conflict"
+            ? "云端有更新 · 本地未同步"
+            : col.oversize
+              ? "数据过大 · 请导出备份并精简"
+              : "未同步 · 自动重试中"}
         </div>
       )}
 

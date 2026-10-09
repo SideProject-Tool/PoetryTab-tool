@@ -28,9 +28,11 @@
 
 ## 二、模块职责
 
+> **本节是全仓唯一的逐文件结构清单**；README 与 AGENTS 只保留目录级摘要。模块增删只改这里。
+
 ```
 src/pages/newtab/
-  App.jsx                 页面组装：诗词区 → 搜索 → 看板 → 设置 → 撤销 toast
+  App.jsx                 页面组装：诗词区 → 搜索 → 看板 → 设置 → 撤销 toast（含渲染异常 ErrorBoundary 与同步状态徽标）
   grid.js                 列数常量与自适应函数（<640 单列）
   components/
     BookmarkBoard.jsx     看板编排：列容器、自研指针拖拽、FAB、弹窗调度
@@ -38,9 +40,10 @@ src/pages/newtab/
     SettingsPanel.jsx     设置弹窗（外观 / 云同步 / 导入与备份 三 tab）
     board/
       layoutEngine.js     布局纯函数：v2 列式归一、v1→v2 迁移、槽位↔显示列换算
-      widgets.jsx         卡片部件（memo 化）：分组卡 / 常用网站卡 / iframe 卡（⋯ 菜单、懒挂载）
-      ManageSheet.jsx     卡片管理面板：收录 / 批量 / 子分组面包屑 / 自动取名
+      widgets.jsx         卡片部件（memo 化）：分组卡 / iframe 卡（⋯ 菜单、懒挂载）
+      ManageSheet.jsx     卡片管理工作台：左树右列表（收录 / 批量 / 搜索 / 拖拽排序 / 批量移动 / 自动取名）
       FolderBrowser.jsx   子分组浏览浮层（面包屑 + 磁贴）
+      Popover.jsx         锚点定位浮层（⋯ 菜单等，portal 渲染、防裁剪防遮挡）
       GateScreen.jsx      登录门
   hooks/
     useCollection.js      云数据层（全部业务规则在此：认证、保存管线、冲突仲裁、CRUD、撤销）
@@ -60,13 +63,13 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 
 - 卡片按列排布、CSS 流式渲染：**零绝对定位、零高度测量、零结算算法**；云端布局为 5 个槽位的 id 有序列表
 - 若采用自由画布（显式 `{x,y,w,h}` 坐标 + 绝对定位），必须配套「逐卡实测高度 → 重力整理（O(n²)）→ 全卡带过渡动画重排」的闭环才能防重叠，任何交互都会触发一遍，交互流畅度无法保证；且坐标在换设备/换列数时需换算，重叠缺陷频发
-- 结论：流畅度优先，选择列式；代价是放弃自由摆放与逐卡拉伸（iframe 高度改为 ⋯ 菜单档位）
+- 结论：流畅度优先，选择列式；代价是放弃自由摆放与逐卡拉伸（iframe 高度经 ⋯ 菜单设定：四档预设或自定义像素值 200-2000）
 
 ### 2. 拖拽：自研指针几何，不依赖 dnd-kit
 
 - dnd-kit 的落点检测依赖 IntersectionObserver 测量可放置矩形；且带来额外包体
 - 自研方案：悬停列 = x 落入的等宽区间；插入位 = 指针越过各卡中点。纯几何、零依赖、全平台一致
-- 拖拽更新**不走 rAF**、宽度监听做 **ResizeObserver + window resize + matchMedia 断点**三层兜底——个别内嵌 webview 会停发 rAF/IO/RO 回调（真实 Chrome 无此问题，防御性处理）
+- 容器宽度监听为 ResizeObserver + window resize 双监听（各一行）；拖拽直接写样式、不走 rAF——实现更少且足够流畅，拖拽更新有相等性守卫，不会渲染风暴
 
 ### 3. 同步：整份覆盖 + 强制仲裁，而非合并
 
@@ -99,11 +102,11 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 
 ## 五、Worker 与存储
 
-- Worker 名 `proton-collect-sync`，自定义域 sync.pathmemos.com；兼容日期 2026-09-01
+- Worker 名 `proton-collect-sync`，自定义域 sync.pathmemos.com（`wrangler.toml` 保存在部署机上、不入本仓库，兼容日期等以服务器配置为准）
 - R2 键布局：`pt/accounts/<uid>.json`（账号）、`pt/data/<uid>.json`（最新数据）、`pt/data/<uid>/snap-*.json`（快照 ×5）、`pt/favicons/<domain>.bin`、`pt/titles/<hash>.json`
 - 绑定：`BUCKET`(R2)、`ASSETS`(静态资产，**必须显式 binding 且 run_worker_first=true**——缺省不注入 env.ASSETS、资产直出绕过 Worker，详见 AGENTS 部署节)、`SYNC_TOKEN`(云端 secret，会话/挑战签名)
 - 静态资产：Worker 托管 dist-web；`/assets/*` 一年 immutable，HTML no-store
-- 本地全量自测：`node scripts/test-worker.mjs`（内存 R2 模拟，33 项断言）；线上冒烟：`node scripts/test-auth.mjs`
+- 本地全量自测：`node scripts/test-worker.mjs`（内存 R2 模拟）；线上冒烟：`node scripts/test-auth.mjs`
 
 ## 六、部署与分发（详见 AGENTS.md）
 
@@ -116,5 +119,5 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 
 - **Worker**：mock R2（含条件写语义）跑全部端点断言，改 worker 必跑
 - **线上协议**：test-auth.mjs 随机测试账号对生产冒烟
-- **前端**：双端手工回归（清单在 AGENTS「改动后验证」）；E2E 自动化暂缺，回归以上述为准
+- **前端**：双端手工回归（清单在 AGENTS「改动后验证」）
 - 开发注意：网页版 dev server **直连生产云**，用一次性测试账号

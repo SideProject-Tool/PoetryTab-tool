@@ -38,7 +38,6 @@ const TABS = [
 ];
 const POEM_SPACE_PRESETS = [240, 360, 480];
 const COL_OPTIONS = ["auto", 2, 3, 4, 5];
-/** 页面底色预设（浅色系，与白卡搭配） */
 /** 页面底色预设：浅色主题用浅色系，深色主题用深色系（两套独立配色） */
 const BG_PRESETS_LIGHT = [
   { hex: "#F0F7FF", name: "浅天蓝" },
@@ -184,13 +183,14 @@ export default function SettingsPanel({ col }) {
     });
   };
 
-  const handleUidKey = (e) => {
+  const handleUidKey = async (e) => {
     if (e.key !== "Enter") return;
     const v = e.currentTarget.value.trim();
     if (!v || v === col.uid) { setUidDraft(null); return; }
-    // 切换 ID：退出到引导门并预填新 ID，密码在引导门输入（受保护账号必须验密码）
+    // 切换 ID：先走退出流程（含未同步保存检查，见 sync-and-data §三），通过后到引导门以新 ID 登录
+    const r = await col.logout();
+    if (!r.ok) { setMsg("✗ " + r.error); setUidDraft(null); return; }
     try { sessionStorage.setItem("gatePrefillUid", v); } catch {}
-    col.logout();
     setUidDraft(null);
     close();
   };
@@ -525,7 +525,16 @@ export default function SettingsPanel({ col }) {
                     <span className="settings-row-value">打开 ↗</span>
                   </button>
 
-                  <button className="settings-row" onClick={() => { col.logout(); close(); }} type="button" title="退出登录，返回引导页">
+                  <button
+                    className="settings-row"
+                    onClick={async () => {
+                      const r = await col.logout();
+                      if (r.ok) close();
+                      else setMsg("✗ " + r.error);
+                    }}
+                    type="button"
+                    title="退出登录，返回引导页"
+                  >
                     <span className="settings-row-icon">
                       <LogoutIcon className="w-5 h-5" />
                     </span>

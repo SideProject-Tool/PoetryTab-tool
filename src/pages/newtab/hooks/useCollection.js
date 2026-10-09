@@ -4,7 +4,6 @@ import {
   addChildToFolder,
   updateItem,
   removeItem,
-  moveItem,
   moveNodesTo as moveToFolderSvc,
   reorderItem,
   genId,
@@ -145,7 +144,6 @@ function defaultData() {
   return {
     v: 1,
     folders: [{ id: genId("f"), title: "我的收藏", children: [] }],
-    quickSites: [],
     iframeWidgets: [],
     settings: { ...SETTINGS_DEFAULTS },
     layout: { v: 2, cols: [[], [], [], [], []] },
@@ -154,7 +152,7 @@ function defaultData() {
 /** 云端数据兜底：数组字段缺失/损坏时补默认值。
  *  深度归一：folder 补 children、剔除 null/非对象项、settings.cats 非数组回退默认，避免畸形数据渲染崩溃。
  *  layout 保持原样透传：新格式为对象 {v:2,cols}（旧客户端按缺失处理自动装箱），旧格式为坐标数组。
- *  老数据「常用网站」（quickSites）已下线：读取时直接丢弃（v1.5.0） */
+ *  旧数据可能残留 quickSites 字段：读取时容忍、归一后丢弃，不再写入 */
 function ensureShape(d) {
   if (!d || typeof d !== "object") return defaultData();
   const normList = (list) =>
@@ -167,11 +165,11 @@ function ensureShape(d) {
   if (!Array.isArray(settings.cats)) settings.cats = [...SETTINGS_DEFAULTS.cats];
   if (!Array.isArray(settings.hiddenCards)) settings.hiddenCards = [];
   if (!settings.pageBgLight && settings.pageBg) settings.pageBgLight = settings.pageBg; // 旧字段迁移
+  const { quickSites: _legacy, ...rest } = d;
   return {
-    ...d,
+    ...rest,
     v: d.v || 1,
     folders,
-    quickSites: [],
     iframeWidgets: normList(d.iframeWidgets),
     layout: d.layout ?? { v: 2, cols: [[], [], [], [], []] },
     settings,
@@ -217,6 +215,7 @@ export function useCollection() {
   const [status, setStatus] = useState(() => (session ? "boot" : "idle"));
   const [error, setError] = useState("");
   const [saveState, setSaveState] = useState("saved"); // saved | saving | error | conflict
+  const [oversize, setOversize] = useState(false); // 云端 8MB 超限（413）：错误态下停止自动重试的标记，供界面如实提示
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
   const [savedAt, setSavedAt] = useState(() => cachedBoot.current?.savedAt || "");
@@ -225,6 +224,7 @@ export function useCollection() {
   const baseSavedAtRef = useRef(cachedBoot.current?.savedAt || ""); // 乐观锁：客户端持有的云端版本
   const dirtyRef = useRef(!!cachedBoot.current?.dirty); // 有未落库的本地改动
   const conflictCloudSavedAtRef = useRef(""); // 冲突时云端的版本号：强制「以本地为准」上传时使用
+  const oversizeRef = useRef(false); // 云端 8MB 超限（413）：确定性失败，暂停 30s 自动重试，数据精简后再修改时恢复
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const applyAuth = useCallback((id, token) => {
@@ -315,6 +315,14 @@ export function useCollection() {
         setSaveState("error");
         setError("检测到其他设备的修改，但拉取云端失败，请稍后重试");
       }
+      return;
+    }
+    if (r.status === 413) {
+      // 数据超限（云端上限 8MB）：确定性失败，停止 30s 自动重试；数据精简后再次修改（mutate）即恢复管线
+      oversizeRef.current = true;
+      setOversize(true);
+      setSaveState("error");
+      setError("数据过大（云端上限 8MB），请导出备份并精简后重试");
       return;
     }
     setSaveState("error");
@@ -426,10 +434,11 @@ export function useCollection() {
     await saveChain;
   }, []);
 
-  /* 保存失败自动重试：每 30s 重发直到成功（conflict 需用户手动抉择，不自动重试） */
+  /* 保存失败自动重试：每 30s 重发直到成功（conflict 需用户手动抉择、413 为确定性失败，均不自动重试） */
   useEffect(() => {
     if (saveState !== "error") return;
     const t = setInterval(() => {
+      if (oversizeRef.current) return;
       if (sessionRef.current && dataRef.current) enqueueSave(dataRef.current);
     }, 30000);
     return () => clearInterval(t);
@@ -439,6 +448,8 @@ export function useCollection() {
   const mutate = useCallback((fn) => {
     if (!sessionRef.current) return;
     dirtyRef.current = true;
+    oversizeRef.current = false; // 数据再次变化：恢复正常保存管线（413 后精简数据的恢复路径）
+    setOversize(false);
     setData((prev) => {
       const next = fn(prev);
       dataRef.current = next;
@@ -453,6 +464,7 @@ export function useCollection() {
     const flushOnHide = () => {
       if (!dirtyRef.current || !sessionRef.current || !dataRef.current) return;
       if (saveStateRef.current === "conflict") return; // 冲突待用户抉择，不自动以本地覆盖云端
+      if (oversizeRef.current) return; // 413 超限：发了也会失败，不浪费 keepalive 请求
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
@@ -522,6 +534,18 @@ export function useCollection() {
       setStatus("ready");
       return { ok: true };
     }
+    // 云端未被推进（版本 = 缓存版本）：沿用本地未同步缓存，语义同启动 304（修改不丢，交给防抖续传）
+    if (cached?.dirty && cached.data && d && cloudSavedAt === cached.savedAt) {
+      dataRef.current = cached.data;
+      setData(cached.data);
+      baseSavedAtRef.current = cached.savedAt;
+      dirtyRef.current = true;
+      setSavedAt(cached.savedAt);
+      setError("");
+      setStatus("ready");
+      setSaveState("saved");
+      return { ok: true };
+    }
     if (d) {
       const shaped = ensureShape(d);
       setData(shaped);
@@ -583,10 +607,27 @@ export function useCollection() {
     return { ok: false, error: msg };
   }, [adoptCloud]);
 
-  const logout = useCallback(() => {
+  /** 退出登录（同步状态机 §三）：非冲突的未同步修改先立即保存、成功才退出；
+   *  冲突仲裁态中止退出（不借道静默覆盖云端）；保存失败中止退出。返回 {ok, error} 供调用方提示 */
+  const logout = useCallback(async () => {
+    if (saveStateRef.current === "conflict") {
+      return { ok: false, error: "请先解决同步冲突（设置 → 云同步，选择以本地或云端为准）再退出" };
+    }
+    if (dirtyRef.current && sessionRef.current && dataRef.current) {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      enqueueSave(dataRef.current);
+      await saveChain;
+      if (saveStateRef.current !== "saved") {
+        return { ok: false, error: "存在未同步的修改且保存未完成，已取消退出；请检查网络后重试" };
+      }
+    }
     clearAuth();
     resetToIdle();
     try { sessionStorage.removeItem("gatePrefillUid"); } catch { /* 无痕模式等 */ }
+    return { ok: true };
   }, [clearAuth, resetToIdle]);
 
   /* 历史快照：列表 + 恢复（恢复动作在服务端也留快照，可再次撤销） */
@@ -690,7 +731,6 @@ export function useCollection() {
   const renameNode = useCallback((id, title) => mutate((d) => updateItem(d, id, { title })), [mutate]);
   const updateNode = useCallback((id, patch) => mutate((d) => updateItem(d, id, patch)), [mutate]);
   const removeNode = useCallback((id) => removeWithUndo("已删除分组或书签", () => mutate((d) => removeItem(d, id))), [mutate, removeWithUndo]);
-  const moveNode = useCallback((id, dir) => mutate((d) => moveItem(d, id, dir)), [mutate]);
   const reorderNode = useCallback((id, newIndex) => mutate((d) => reorderItem(d, id, newIndex)), [mutate]);
   /** 批量移动条目到目标分组/子分组（跨层级、防成环） */
   const moveNodesTo = useCallback((ids, folderId) => mutate((d) => moveToFolderSvc(d, ids, folderId)), [mutate]);
@@ -701,10 +741,10 @@ export function useCollection() {
   const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } })), [mutate]);
 
   return {
-    uid, hasUid, data, status, error, saveState, savedAt,
+    uid, hasUid, data, status, error, saveState, savedAt, oversize,
     login, register, reload, saveNow, logout,
     listSnaps, restoreSnap, replaceAll, importBookmarks,
-    addItem, addItems, addFolder, renameNode, updateNode, removeNode, moveNode, reorderNode, moveNodesTo,
+    addItem, addItems, addFolder, renameNode, updateNode, removeNode, reorderNode, moveNodesTo,
 
     addIframe, removeIframe, updateIframe,
     setLayout, setSettings,
