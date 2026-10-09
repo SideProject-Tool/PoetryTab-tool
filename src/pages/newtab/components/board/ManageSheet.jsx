@@ -550,7 +550,6 @@ export default function ManageSheet({ col, target, onClose }) {
         </div>
       );
     }
-    const menuOpen = treeMenu?.id === s.id;
     return (
       <div
         key={s.id}
@@ -582,15 +581,6 @@ export default function ManageSheet({ col, target, onClose }) {
         >
           <MoreIcon className="w-3.5 h-3.5" />
         </button>
-        {menuOpen && (
-          <RowMenu
-            row={s}
-            onClose={closeMenus}
-            onEdit={() => { setTreeRenamingId(s.id); setTreeDraft(s.title || ""); }}
-            onOpen={() => {}}
-            onDelete={() => { col.removeNode(s.id); if (currentId === s.id) setCurrentId(target.id); }}
-          />
-        )}
       </div>
     );
   };
@@ -623,16 +613,6 @@ export default function ManageSheet({ col, target, onClose }) {
               <MoreIcon className="w-3.5 h-3.5" />
             </span>
           )}
-          {treeMenu?.id === s.id && (
-            <RowMenu
-              row={s}
-              anchor={treeMenu.anchor}
-              onClose={closeMenus}
-              onEdit={() => { setTreeRenamingId(s.id); setTreeDraft(s.title || ""); }}
-              onOpen={() => {}}
-              onDelete={() => { col.removeNode(s.id); if (currentId === s.id) setCurrentId(target.id); }}
-            />
-          )}
         </div>
       ))}
       <button type="button" className="ms-chip add" onClick={() => { setSubAdding(true); setSubDraft(""); }}>
@@ -655,9 +635,21 @@ export default function ManageSheet({ col, target, onClose }) {
     </div>
   );
 
+  const treeMenuItemNode = treeMenu ? findNode(col.data, treeMenu.id)?.node : null;
   return (
     <div className="bf-overlay ms-overlay" onClick={onClose}>
       <div className="ms-panel" onClick={(e) => e.stopPropagation()}>
+        {/* 子分组 ⋯ 菜单（树行与手机 chips 共用一份，portal 渲染避免重复浮层） */}
+        {treeMenuItemNode && (
+          <RowMenu
+            row={treeMenuItemNode}
+            anchor={treeMenu.anchor}
+            onClose={closeMenus}
+            onEdit={() => { setTreeRenamingId(treeMenuItemNode.id); setTreeDraft(treeMenuItemNode.title || ""); }}
+            onOpen={() => {}}
+            onDelete={() => { col.removeNode(treeMenuItemNode.id); if (currentId === treeMenuItemNode.id) setCurrentId(target.id); }}
+          />
+        )}
         {/* 头部：当前节点名 + 重命名 + 关闭 */}
         <div className="ms-header">
           {headerEditing ? (

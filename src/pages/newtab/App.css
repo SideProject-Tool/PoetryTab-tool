@@ -1987,6 +1987,15 @@
   background: color-mix(in oklab, var(--color-base-content) 10%, transparent);
 }
 
+/* Popover 浮层（portal 到 body）：高层级 + 自带底色，防被行内容覆盖 */
+.ms-popover {
+  z-index: 1200;
+  background: var(--color-base-100);
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  border-radius: 0.7rem;
+  box-shadow: 0 10px 30px color-mix(in oklab, var(--color-base-content) 22%, transparent);
+}
+
 .ms-row-menu {
   position: absolute;
   right: 0;
