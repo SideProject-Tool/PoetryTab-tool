@@ -1,10 +1,10 @@
 // Poetry-Tab — 用户体系 + 云同步 + 网页版托管 Worker
 // 存储：R2 桶（绑定名 BUCKET）
 //   pt/accounts/<uid>.json             账号记录 {v, iter, salt, authKey, createdAt}
-//   pt/data/<uid>.json                 最新数据 {savedAt, data}
-//   pt/data/<uid>/snap-<ts>-<rand>.json 历史快照（保留最近 5 份；5 分钟内连续保存合并为一份，可经 /api/snap* 恢复）
+//   pt/data/<uid>.json                 最新数据 {savedAt, data}（唯一数据副本，无历史快照）
 //   pt/favicons/<domain>.bin           favicon 代理缓存（元数据存 contentType）
 //   pt/titles/<hash>.json              网页标题代理缓存（30 天）
+//   历史快照功能已下线：pt/data/<uid>/snap-*.json 不再写入，且每次成功保存顺手清空遗留键
 // 认证（客户端全程不发送明文密码）：
 //   注册：客户端 PBKDF2-SHA256(密码, 随机盐, iter) → authKey，连同盐提交，服务器只存派生结果
 //   登录：/api/challenge 发放带签名的一次性挑战（含盐与迭代次数）→ 客户端 HMAC-SHA256(authKey, challenge) 应答
@@ -16,7 +16,6 @@
 // 网页：/ 与静态资源来自 ./public；带 hash 的静态资产配 immutable 长缓存
 
 const MAX_BODY = 8 * 1024 * 1024; // 8MB
-const KEEP_SNAPS = 5;
 const SESSION_TTL = 30 * 24 * 3600; // 30 天（秒）
 const CHALLENGE_TTL = 10 * 60; // 挑战有效期（秒）
 const ITER_DEFAULT = 600000; // PBKDF2 迭代次数（OWASP 推荐）
@@ -165,27 +164,14 @@ async function writeDataCAS(env, uid, data, prev) {
   return { conflict: false, savedAt, payload };
 }
 
-/* 快照轮转（尽力而为：主数据已写成功，快照失败仅记日志、不影响本次保存结果
-   ——否则快照异常返 5xx，客户端重试会撞乐观锁）。
-   5 分钟节流：距最新一份快照不足 5 分钟则覆盖它（连续自动保存合并为一份，避免烧光历史），
-   之后统一轮转只保留最近 KEEP_SNAPS 份 */
-const SNAP_MIN_INTERVAL = 5 * 60 * 1000;
-async function rotateSnapshot(env, uid, payload) {
+/* 历史快照功能已下线：每次成功保存顺手清空该 uid 的遗留快照键，
+   存量快照随用户下一次保存自然清零（R2 DELETE 免计费；失败仅记日志，不影响保存结果） */
+async function purgeSnaps(env, uid) {
   try {
-    const prefix = `pt/data/${uid}/snap-`;
-    const byNewest = (a, b) => (b.uploaded ? b.uploaded.getTime() : 0) - (a.uploaded ? a.uploaded.getTime() : 0);
-    const snaps = (await env.BUCKET.list({ prefix })).objects || [];
-    snaps.sort(byNewest);
-    if (snaps.length && Date.now() - (snaps[0].uploaded ? snaps[0].uploaded.getTime() : 0) < SNAP_MIN_INTERVAL) {
-      await env.BUCKET.delete(snaps[0].key);
-      snaps.shift();
-    }
-    await env.BUCKET.put(`${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`, payload);
-    for (const old of snaps.slice(KEEP_SNAPS - 1)) {
-      await env.BUCKET.delete(old.key);
-    }
+    const snaps = (await env.BUCKET.list({ prefix: `pt/data/${uid}/snap-` })).objects || [];
+    for (const o of snaps) await env.BUCKET.delete(o.key);
   } catch (e) {
-    console.error("snapshot rotation failed:", uid, e && e.message);
+    console.error("snap purge failed:", uid, e && e.message);
   }
 }
 
@@ -316,57 +302,14 @@ async function handleApi(request, env, url) {
       const nowHead = await readDataHead(env, uid);
       return json({ error: "conflict", savedAt: nowHead ? nowHead.savedAt : null }, 409);
     }
-    await rotateSnapshot(env, uid, r.payload);
+    await purgeSnaps(env, uid); // 快照已下线：顺手清理存量快照键
     return json({ ok: true, savedAt: r.savedAt });
-  }
-
-  /* 快照列表：[{key, at}]（at 为快照内记录的保存时刻） */
-  if (p === "/api/snaps" && request.method === "GET") {
-    const uid = await readSession(env, request);
-    if (!uid) return json({ error: "unauthorized" }, 401);
-    const snaps = await env.BUCKET.list({ prefix: `pt/data/${uid}/snap-` });
-    const items = [];
-    for (const o of snaps.objects || []) {
-      try {
-        const obj = await env.BUCKET.get(o.key);
-        if (!obj) continue;
-        const parsed = await obj.json();
-        items.push({ key: o.key, at: parsed.savedAt || (o.uploaded ? o.uploaded.toISOString() : "") });
-      } catch { /* 单份损坏跳过，不阻塞列表 */ }
-    }
-    items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
-    return json({ snaps: items });
-  }
-
-  /* 快照恢复：{key} → 校验 key 属于该 uid 的快照集合后整份覆盖当前数据（同样走 CAS） */
-  if (p === "/api/snap/restore" && request.method === "POST") {
-    const uid = await readSession(env, request);
-    if (!uid) return json({ error: "unauthorized" }, 401);
-    const b = await readBody(request);
-    const key = String((b && b.key) || "");
-    const snaps = await env.BUCKET.list({ prefix: `pt/data/${uid}/snap-` });
-    const owned = (snaps.objects || []).some((o) => o.key === key); // 只允许恢复自己 uid 下的快照
-    if (!owned) return json({ error: "snap not found" }, 404);
-    const obj = await env.BUCKET.get(key);
-    if (!obj) return json({ error: "snap not found" }, 404);
-    let payload;
-    try {
-      payload = await obj.json();
-    } catch {
-      return json({ error: "snap corrupted" }, 500);
-    }
-    if (!payload || !payload.data || typeof payload.data !== "object" || !Array.isArray(payload.data.folders)) {
-      return json({ error: "snap corrupted" }, 500);
-    }
-    const head = await readDataHead(env, uid);
-    const r = await writeDataCAS(env, uid, payload.data, head);
-    if (r.conflict) return json({ error: "conflict" }, 409);
-    await rotateSnapshot(env, uid, r.payload); // 恢复动作本身也留一份快照，可再撤销
-    return json({ ok: true, savedAt: r.savedAt, data: payload.data });
   }
 
   /* favicon 代理：/api/favicon?domain=example.com
      R2 缓存 30 天；回源 Google s2 → DuckDuckGo 兜底；失败 404（前端降级为字母磁贴）。
+     浏览器 HTTP 缓存：命中 30 天（新标签页重复打开零请求）；404 负缓存 1 天
+     （拿不到图标的站点不因每次打开重复回源）。
      国内直连外网 favicon 服务不可靠，走自家 Worker 代理解决 */
   if (p === "/api/favicon" && request.method === "GET") {
     const domain = (url.searchParams.get("domain") || "").trim().toLowerCase();
@@ -381,7 +324,7 @@ async function handleApi(request, env, url) {
         return new Response(cached.body, {
           headers: {
             "Content-Type": cached.customMetadata.contentType || "image/x-icon",
-            "Cache-Control": "public, max-age=604800",
+            "Cache-Control": "public, max-age=2592000",
             ...CORS_HEADERS,
           },
         });
@@ -406,7 +349,7 @@ async function handleApi(request, env, url) {
         });
       } catch { /* 换下一个回源 */ }
     }
-    return json({ error: "favicon not found" }, 404);
+    return json({ error: "favicon not found" }, 404, { "Cache-Control": "public, max-age=86400" }); // 404 负缓存 1 天
   }
 
   /* 标题代理：/api/title?url=https://example.com

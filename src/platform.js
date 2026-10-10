@@ -42,3 +42,26 @@ export async function getBrowserBookmarks() {
   const roots = tree[0]?.children || [];
   return mapChildren(roots);
 }
+
+/** 打开浏览器自带的历史记录页：Edge 为 edge://history，其余 Chromium 系（Chrome/Brave/Opera）为 chrome://history */
+export function openHistoryPage() {
+  const url = /Edg\//.test(typeof navigator !== "undefined" ? navigator.userAgent : "")
+    ? "edge://history/"
+    : "chrome://history/";
+  openUrl(url);
+}
+
+/**
+ * 浏览历史（仅扩展端，需 manifest 的 history 权限；仅本机读取，永不上传）。
+ * query 为空 = 最近访问记录；否则按标题/网址搜索全部历史。按 lastVisitTime 倒序。
+ * 返回 [{title, url, lastVisitTime}]（已滤除非 http(s) 协议行）；网页端或不支持时返回 null。
+ */
+export async function getHistory(query = "", maxResults = 20) {
+  if (!IS_EXT || !globalThis.chrome?.history?.search) return null;
+  const rows = await new Promise((resolve, reject) => {
+    globalThis.chrome.history.search({ text: query, maxResults, startTime: 0 }, (res) =>
+      chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve(res)
+    );
+  });
+  return (rows || []).filter((r) => /^https?:\/\//i.test(r.url || ""));
+}

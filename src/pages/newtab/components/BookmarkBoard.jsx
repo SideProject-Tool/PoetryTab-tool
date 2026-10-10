@@ -4,11 +4,14 @@ import {
   IoCloseOutline as CloseIcon,
   IoFolderOutline as FolderIcon,
   IoGridOutline as GridIcon,
+  IoCheckboxOutline as TodoIcon,
+  IoTimeOutline as HistoryIcon,
 } from "react-icons/io5";
 import { safeUrl } from "../services/collection";
+import { IS_EXT } from "../../../platform";
 import { colsForWidth, REF_SLOTS } from "../grid";
 import { GAP, defaultCardH, normalizeLayout, migrateV1Layout, visibleColumns, columnsToLayout } from "./board/layoutEngine";
-import { GroupWidget, IframeWidget } from "./board/widgets";
+import { GroupWidget, IframeWidget, TodoWidget, HistoryWidget } from "./board/widgets";
 import ManageSheet from "./board/ManageSheet";
 import FolderBrowser from "./board/FolderBrowser";
 import GateScreen from "./board/GateScreen";
@@ -35,10 +38,12 @@ export default function BookmarkBoard({ col }) {
   const [manage, setManage] = useState(null); // {type:"folder",id}
   const [browsing, setBrowsing] = useState(null); // folderId
   const [fabOpen, setFabOpen] = useState(false);
-  const [modal, setModal] = useState(null); // "group" | "widget"
+  const [modal, setModal] = useState(null); // "group" | "widget" | "todo" | "history"
   const [newGroup, setNewGroup] = useState("");
   const [wTitle, setWTitle] = useState("");
   const [wUrl, setWUrl] = useState("");
+  const [tTitle, setTTitle] = useState("");
+  const [hTitle, setHTitle] = useState("");
 
   useLayoutEffect(() => {
     if (!boardEl) return;
@@ -57,6 +62,8 @@ export default function BookmarkBoard({ col }) {
 
   const folders = useMemo(() => (data ? data.folders || [] : []), [data]);
   const iframeWidgets = useMemo(() => (data ? data.iframeWidgets || [] : []), [data]);
+  const todoWidgets = useMemo(() => (data ? data.todoWidgets || [] : []), [data]);
+  const historyWidgets = useMemo(() => (data ? data.historyWidgets || [] : []), [data]);
 
   /* 卡片显隐（云端 settings.hiddenCards） */
   const hiddenCards = useMemo(() => {
@@ -64,7 +71,7 @@ export default function BookmarkBoard({ col }) {
     return new Set(list.filter((x) => typeof x === "string"));
   }, [data?.settings?.hiddenCards]);
 
-  /* 网格内的卡片清单：各分组 + iframe 小部件（按设置隐藏） */
+  /* 网格内的卡片清单：各分组 + iframe 小部件 + 待办清单 + 浏览历史（按设置隐藏） */
   const widgetDefs = useMemo(() => {
     const list = [];
     for (const f of folders) {
@@ -73,8 +80,14 @@ export default function BookmarkBoard({ col }) {
     for (const w of iframeWidgets) {
       if (!hiddenCards.has("w:" + w.id)) list.push({ id: "w:" + w.id, kind: "iframe", widget: w, title: w.title || "小部件" });
     }
+    for (const w of todoWidgets) {
+      if (!hiddenCards.has("t:" + w.id)) list.push({ id: "t:" + w.id, kind: "todo", widget: w, title: w.title || "待办清单" });
+    }
+    for (const w of historyWidgets) {
+      if (!hiddenCards.has("h:" + w.id)) list.push({ id: "h:" + w.id, kind: "history", widget: w, title: w.title || "浏览历史" });
+    }
     return list;
-  }, [folders, iframeWidgets, hiddenCards]);
+  }, [folders, iframeWidgets, todoWidgets, historyWidgets, hiddenCards]);
   const defMap = useMemo(() => new Map(widgetDefs.map((d) => [d.id, d])), [widgetDefs]);
 
   /* 列数：设置优先（2-5），否则按宽度自适应；手机（<640px）一律单列 */
@@ -239,6 +252,16 @@ export default function BookmarkBoard({ col }) {
     setWUrl("");
     setModal(null);
   };
+  const submitTodo = () => {
+    col.addTodo({ title: tTitle.trim() || "待办清单" });
+    setTTitle("");
+    setModal(null);
+  };
+  const submitHistory = () => {
+    col.addHistory({ title: hTitle.trim() || "浏览历史" });
+    setHTitle("");
+    setModal(null);
+  };
 
   /* 未登录：全屏引导门（登录 / 注册） */
   if (!hasUid) return <GateScreen col={col} containerRef={setBoardEl} />;
@@ -282,13 +305,17 @@ export default function BookmarkBoard({ col }) {
           dragHandle={handle}
         />
       );
+    if (def.kind === "todo")
+      return <TodoWidget widget={def.widget} onRemove={col.removeTodo} onUpdate={col.updateTodo} dragHandle={handle} />;
+    if (def.kind === "history")
+      return <HistoryWidget widget={def.widget} onRemove={col.removeHistory} onUpdate={col.updateHistory} dragHandle={handle} />;
     return <IframeWidget widget={def.widget} onRemove={col.removeIframe} onUpdate={col.updateIframe} dragHandle={handle} />;
   };
 
   /* 空看板引导：区分「真的没内容」与「内容被全部隐藏」两种空态 */
   const isEmptyBoard = widgetDefs.length === 0;
   const hasAnyContent =
-    !iframeWidgets.length && (folders || []).every((f) => !(f.children || []).length);
+    !iframeWidgets.length && !todoWidgets.length && !historyWidgets.length && (folders || []).every((f) => !(f.children || []).length);
 
   return (
     <div className={`bookmark-board board-rgl cols-${colCount}${dragId ? " dragging" : ""}`} ref={setBoardEl}>
@@ -365,6 +392,14 @@ export default function BookmarkBoard({ col }) {
               <button type="button" id="fab-new-widget" onClick={() => { setModal("widget"); setFabOpen(false); }}>
                 <GridIcon className="w-4 h-4" /> iframe小部件
               </button>
+              <button type="button" id="fab-new-todo" onClick={() => { setModal("todo"); setFabOpen(false); }}>
+                <TodoIcon className="w-4 h-4" /> 待办清单
+              </button>
+              {IS_EXT && (
+                <button type="button" id="fab-new-history" onClick={() => { setModal("history"); setFabOpen(false); }}>
+                  <HistoryIcon className="w-4 h-4" /> 浏览历史
+                </button>
+              )}
             </div>
           </>
         )}
@@ -372,7 +407,7 @@ export default function BookmarkBoard({ col }) {
           type="button"
           id="fab-main"
           className={`board-fab ${fabOpen ? "open" : ""}`}
-          title="网站收藏 / iframe小部件"
+          title="网站收藏 / iframe小部件 / 待办清单 / 浏览历史"
           onClick={() => setFabOpen((o) => !o)}
         >
           <AddIcon className="w-7 h-7" />
@@ -439,6 +474,70 @@ export default function BookmarkBoard({ col }) {
             </div>
             <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
               添加后出现在末列；部分网站禁止内嵌会显示空白，可用卡片右上角 ⋯ 打开
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === "todo" && (
+        <div className="bf-overlay" onClick={() => setModal(null)}>
+          <div className="bf-panel bf-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="bf-header">
+              <h3 className="bf-title">新建待办清单</h3>
+              <div className="bf-header-right">
+                <button type="button" className="bf-close" onClick={() => setModal(null)} title="关闭">
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="bm-add">
+              <input
+                className="bm-input"
+                type="text"
+                placeholder="标题（可选，默认「待办清单」）"
+                autoFocus
+                value={tTitle}
+                onChange={(e) => setTTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitTodo()}
+              />
+              <button type="button" className="bm-add-btn" onClick={submitTodo}>
+                创建
+              </button>
+            </div>
+            <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
+              新卡片出现在末列，在卡片内添加待办条目，可列内排序、跨列拖动
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === "history" && (
+        <div className="bf-overlay" onClick={() => setModal(null)}>
+          <div className="bf-panel bf-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="bf-header">
+              <h3 className="bf-title">新增浏览历史</h3>
+              <div className="bf-header-right">
+                <button type="button" className="bf-close" onClick={() => setModal(null)} title="关闭">
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+            <div className="bm-add">
+              <input
+                className="bm-input"
+                type="text"
+                placeholder="标题（可选，默认「浏览历史」）"
+                autoFocus
+                value={hTitle}
+                onChange={(e) => setHTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitHistory()}
+              />
+              <button type="button" className="bm-add-btn" onClick={submitHistory}>
+                创建
+              </button>
+            </div>
+            <div className="bt-empty" style={{ padding: "0 0.8rem 0.8rem" }}>
+              展示最近 20 条访问记录，可在卡片内搜索全部历史；仅扩展版可用，记录仅本机读取不上传
             </div>
           </div>
         </div>

@@ -104,7 +104,7 @@ node scripts/release.mjs 1.4.1 --skip-live-smoke
 
 **脚本完成后仍需人工**（脚本无法替代）：
 
-1. 浏览器手工回归：登录 → 建分组/子分组 → 批量收录 → 拖拽（列内+跨列）→ 390px 手机视口 → 快照列表（见「改动后验证」）
+1. 浏览器手工回归：登录 → 建分组/子分组 → 批量收录 → 拖拽（列内+跨列）→ 390px 手机视口（见「改动后验证」）
 2. git 提交推送（版本号变更 + 本次发布说明）
 3. 商店上传 zip 并更新权限/数据使用说明（如有变化）
 
@@ -137,7 +137,7 @@ assets/fonts/        江西拙楷字体（pnpm split 子集化）
 
 - 汇报时建议附：改动了什么、用户应重点验证哪些交互（可参考下方手工回归要点）
 - Worker 自测与发布门禁由 `node scripts/release.mjs` 自动执行（test-worker / 线上校验 / 冒烟），属发布流程而非开发验证
-- 手工回归要点（供用户验证参考）：登录门 → 建分组/子分组 → 批量收录 → 拖拽（列内 + 跨列）→ 390px 手机视口单列 → 快照列表
+- 手工回归要点（供用户验证参考）：登录门 → 建分组/子分组 → 批量收录 → 拖拽（列内 + 跨列）→ 390px 手机视口单列
 - E2E 自动化暂缺；如需补自动化，基于列式布局编写 Playwright 断言
 
 ## 云端数据契约（详见 docs/sync-and-data.md —— 唯一权威）
@@ -147,7 +147,7 @@ assets/fonts/        江西拙楷字体（pnpm split 子集化）
 - 铁律：Worker 把 data 当不透明 JSON 存取（只校验体积与顶层 folders 形状），字段兼容由客户端 `ensureShape` 单点负责；**仲裁完成前不存在任何静默覆盖云端的路径**
 - 改数据结构：按「变更类型 → 必须回写的文档」表执行（collection.js / useCollection.js / worker.js / sync-and-data.md / README 摘要），并考虑旧数据兼容
 - 静态资源：`/assets/*`（带 hash）由 Worker 设 `Cache-Control: immutable` 一年缓存，HTML 保持 no-store
-- 账号删除 runbook（用户邮件申请时）：删除该 uid 的三组键 `pt/accounts/<uid>.json`、`pt/data/<uid>.json`、`pt/data/<uid>/snap-*.json` 即完成
+- 账号删除 runbook（用户邮件申请时）：删除该 uid 的两组键 `pt/accounts/<uid>.json`、`pt/data/<uid>.json` 即完成（历史快照已下线）
 
 ## 注意
 

@@ -14,7 +14,7 @@ export default defineConfig({
       : {
           key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiZOLyQxiuWC9SkQMfawpuKimB6QWDi1qjNhmm8KbwQt7KWXMzNJZ9NaC3JudMclFuyx1NYGwQwcJjhaT5wkqXH8l+I6KMxuOG87deKvLs7MIWyIHIYVOB/BuNLGf1VJbQVmVLI89HnNysWBLDYfWy6PH0xrsyy4cDBcASgYBT7E97Ur/zz1Kt2Pifn78nXeeBQJYI5eEDWr3xWUlMkJEXuwxxTGFQq26/nhxjregI7sESPXNcCIUlNe6/LvTgpBlEhlzGonGvyUES338FyQ5nmvvfDM1v5PWcLxKOrW9uG+WQqMCrOz7ljI+j+y2gQy1/T/9cPWLCAaw4tNaWHkvpQIDAQAB",
         }),
-    permissions: ["bookmarks"], // 导入浏览器书签（chrome.bookmarks.getTree）
+    permissions: ["bookmarks", "history"], // bookmarks=导入浏览器书签；history=浏览历史小组件（仅本机读取展示，不上传）
     host_permissions: ["https://sync.pathmemos.com/*"],
     author: "startnewlabs",
     name: "Poetry-Tab",

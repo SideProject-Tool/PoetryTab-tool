@@ -30,19 +30,20 @@
   <ul>
     <li><b>账号凭据</b>：你自设的用户 ID（任意昵称），以及密码的<b>派生验证值</b>。密码本身经过 PBKDF2（600,000 次迭代 + 每账号独立随机盐）在本地派生后提交，<b>明文密码不会离开你的设备，服务器也无法还原</b>。</li>
     <li><b>收藏数据</b>：你主动保存的书签、分组、小组件与偏好设置（主题、搜索引擎、看板列数、诗词分类等）。</li>
-    <li><b>时间戳</b>：每次保存的时间，用于多设备版本比对与历史快照。</li>
+    <li><b>时间戳</b>：每次保存的时间，用于多设备版本比对。</li>
+    <li><b>浏览历史（仅本机，不上传）</b>：扩展版提供可选的「浏览历史」小组件，<b>仅当你添加该小组件后</b>才会在你的设备本地读取浏览器访问记录用于展示。<b>浏览记录不会上传到服务器，不与任何数据关联，也不与第三方共享</b>；删除该小组件即停止读取。</li>
   </ul>
-  <p>我们不收集：真实姓名、邮箱、手机号、支付信息、浏览历史（Poetry-Tab 不会读取你在其他网站的浏览记录）、精确位置，也不使用任何第三方分析或统计 SDK。</p>
+  <p>我们不收集：真实姓名、邮箱、手机号、支付信息、精确位置，也不使用任何第三方分析或统计 SDK。浏览历史仅在上述可选小组件场景下于本机读取，永不上传。</p>
 
   <h2>2. 信息如何存储与保护</h2>
   <ul>
     <li>数据通过 HTTPS 加密传输，存储于 Cloudflare R2 对象存储（区域自动调度）。</li>
     <li>服务器仅保存密码的 PBKDF2 派生值；登录采用服务器签发的一次性挑战应答（HMAC），会话令牌有效期 30 天，退出登录即清除本设备上保存的会话。</li>
-    <li>数据写入采用版本比对（乐观锁），保留最近 5 份历史快照用于误删恢复。</li>
+    <li>数据写入采用版本比对（乐观锁）防止并发覆盖；云端始终只保留最新一份数据。</li>
   </ul>
 
   <h2>3. 信息的使用</h2>
-  <p>收集的信息<b>仅用于</b>：验证你的登录、在你自有的账号空间内同步与恢复收藏数据、生成历史快照。除此之外无任何其他用途。</p>
+  <p>收集的信息<b>仅用于</b>：验证你的登录、在你自有的账号空间内同步与恢复收藏数据。除此之外无任何其他用途。</p>
 
   <h2>4. 信息的共享与出售</h2>
   <p>我们不向任何第三方出售、出租或共享你的个人信息；不将数据用于与核心功能无关的用途；不因与本服务无关的法律要求之外的目的转移数据。基础设施服务商（Cloudflare, Inc.）仅作为数据存储处理方。</p>
@@ -60,6 +61,6 @@
   <p>邮箱：<a href="mailto:chenproton@gmail.com">chenproton@gmail.com</a> ｜ 项目开源：<a href="https://github.com/SideProject-Tool/PoetryTab-tool" rel="noopener">github.com/SideProject-Tool/PoetryTab-tool</a></p>
 
   <h2>Privacy Policy (English Summary)</h2>
-  <p class="en">Poetry-Tab collects only a self-chosen user ID, a PBKDF2-derived (irreversible) verification value of your password, and the bookmarks/settings you explicitly save. Data is transmitted over HTTPS, stored in Cloudflare R2 within your own account space, and never sold, shared with third parties, or used for unrelated purposes. No analytics, ads, or browsing-history tracking. Delete anytime via logout (local) or email chenproton@gmail.com (cloud account, processed within 7 business days).</p>
+  <p class="en">Poetry-Tab collects only a self-chosen user ID, a PBKDF2-derived (irreversible) verification value of your password, and the bookmarks/settings you explicitly save. Data is transmitted over HTTPS, stored in Cloudflare R2 within your own account space, and never sold, shared with third parties, or used for unrelated purposes. No analytics or ads. An optional history widget (extension only) reads your browser history on-device for display only — it is never transmitted or shared. Delete anytime via logout (local) or email chenproton@gmail.com (cloud account, processed within 7 business days).</p>
 </body>
 </html>

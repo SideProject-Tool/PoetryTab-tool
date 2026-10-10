@@ -8,7 +8,6 @@ import {
   IoLogOutOutline as LogoutIcon,
   IoDownloadOutline as FileDownloadIcon,
   IoBookmarksOutline as BookmarksIcon,
-  IoTimeOutline as TimeIcon,
   IoArrowUndoOutline as UndoIcon,
   IoCloseOutline as CloseIcon,
 } from "react-icons/io5";
@@ -104,9 +103,6 @@ function Chip({ on, onClick, children, title, disabled, style }) {
 export default function SettingsPanel({ col }) {
   const [isOpen, setIsOpen] = useState(false);
   const [tab, setTab] = useState("look");
-  const [snaps, setSnaps] = useState(null); // null=未加载 []=空
-  const [isSnapsExpanded, setIsSnapsExpanded] = useState(false);
-  const [confirmSnapKey, setConfirmSnapKey] = useState("");
   const [uidDraft, setUidDraft] = useState(null);
   const [msg, setMsg] = useState("");
   const [poemDraft, setPoemDraft] = useState(null);
@@ -139,6 +135,8 @@ export default function SettingsPanel({ col }) {
     const list = [];
     for (const f of col.data?.folders || []) list.push({ id: "f:" + f.id, title: f.title || "未命名分组" });
     for (const w of col.data?.iframeWidgets || []) list.push({ id: "w:" + w.id, title: w.title || "小部件" });
+    for (const w of col.data?.todoWidgets || []) list.push({ id: "t:" + w.id, title: w.title || "待办清单" });
+    for (const w of col.data?.historyWidgets || []) list.push({ id: "h:" + w.id, title: w.title || "浏览历史" });
     return list;
   }, [col.data]);
 
@@ -164,7 +162,8 @@ export default function SettingsPanel({ col }) {
     col.setSettings({ cats });
   };
   const toggleHiddenCard = (id) => {
-    col.setSettings({ hiddenCards: hiddenCards.includes(id) ? hiddenCards.filter((x) => x !== id) : [...hiddenCards, id] });
+    // 显隐走慢通道：低频且不急，5 分钟兜底/捎带/关页落库
+    col.setSettings({ hiddenCards: hiddenCards.includes(id) ? hiddenCards.filter((x) => x !== id) : [...hiddenCards, id] }, { lazy: true });
   };
   const commitPoemSpace = () => {
     setPoemDraft((draft) => {
@@ -259,28 +258,6 @@ export default function SettingsPanel({ col }) {
     } catch {
       setMsg("✗ 备份文件解析失败");
     }
-  };
-
-  /* 历史版本：展开时拉列表，点恢复两步确认 */
-  const toggleSnaps = async () => {
-    const next = !isSnapsExpanded;
-    setIsSnapsExpanded(next);
-    if (next && !snaps) {
-      setSnaps([]);
-      const r = await col.listSnaps();
-      setSnaps(r.ok ? r.snaps : null);
-      if (!r.ok) setMsg("✗ 快照列表拉取失败：" + r.error);
-    }
-  };
-  const handleRestoreSnap = async (key) => {
-    setMsg("正在恢复历史版本…");
-    const r = await col.restoreSnap(key);
-    setConfirmSnapKey("");
-    setMsg(r.ok ? "✓ 已恢复该历史版本（本次恢复也留了快照，可再撤销）" : "✗ " + r.error);
-  };
-
-  const fmtTime = (iso) => {
-    try { return new Date(iso).toLocaleString(); } catch { return String(iso); }
   };
 
   const saveLabel =
@@ -596,47 +573,6 @@ export default function SettingsPanel({ col }) {
                     hidden
                     onChange={(e) => { handleJsonFile(e.target.files?.[0]); e.target.value = ""; }}
                   />
-
-                  <button className="settings-row" onClick={toggleSnaps} type="button">
-                    <span className="settings-row-icon">
-                      {isSnapsExpanded ? <ChevronUpPlaceholder /> : <ChevronDownPlaceholder />}
-                    </span>
-                    <span className="settings-row-label">历史版本</span>
-                    <span className="settings-row-value">
-                      <TimeIcon className="w-3.5 h-3.5 inline" /> 云端快照
-                    </span>
-                  </button>
-
-                  {isSnapsExpanded && (
-                    <div className="settings-snaps">
-                      {snaps === null && <div className="settings-snap-empty">快照加载失败，收起后重试</div>}
-                      {snaps && snaps.length === 0 && <div className="settings-snap-empty">还没有快照（每次云端保存自动留存，最多 5 份）</div>}
-                      {snaps &&
-                        snaps.map((s) => (
-                          <div key={s.key} className="settings-snap-row">
-                            <span className="settings-snap-time">{fmtTime(s.at)}</span>
-                            {confirmSnapKey === s.key ? (
-                              <button
-                                type="button"
-                                id="snap-restore-confirm"
-                                className="settings-snap-op confirming"
-                                onClick={() => handleRestoreSnap(s.key)}
-                              >
-                                再点一次确认恢复
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="settings-snap-op"
-                                onClick={() => setConfirmSnapKey(s.key)}
-                              >
-                                恢复
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -649,12 +585,4 @@ export default function SettingsPanel({ col }) {
       )}
     </div>
   );
-}
-
-/* 历史版本行的展开/收起小图标（避免引入多余图标包） */
-function ChevronDownPlaceholder() {
-  return <span className="chev">▾</span>;
-}
-function ChevronUpPlaceholder() {
-  return <span className="chev">▴</span>;
 }

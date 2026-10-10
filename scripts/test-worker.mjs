@@ -1,4 +1,4 @@
-/* Worker 本地自测：内存 R2 mock 跑全接口（注册/登录/防枚举/ETag/CAS/快照/favicon/CORS）。
+/* Worker 本地自测：内存 R2 mock 跑全接口（注册/登录/防枚举/ETag/CAS/快照清零/favicon/CORS）。
    用法：node scripts/test-worker.mjs  （不碰线上，R2/fetch 均为本地模拟） */
 import worker from "../worker/src/worker.js";
 
@@ -175,19 +175,17 @@ check("challenge 非法 uid 400", r.status === 400, r.status);
 r = await callApi("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uid: "a", challenge: "x", proof: "y" }) });
 check("login 非法 uid 400", r.status === 400, r.status);
 
-console.log("— 快照列表与恢复 —");
+console.log("— 历史快照已下线 —");
 r = await callApi("/snaps", { headers: H });
-const snaps = (await r.json()).snaps;
-check("5 分钟节流：连续保存合并为一份快照", Array.isArray(snaps) && snaps.length === 1, JSON.stringify(snaps));
-r = await callApi("/snaps", { headers: { Authorization: "Bearer bad|1|xx" } });
-check("快照列表需会话", r.status === 401, r.status);
-const target = snaps[0]; // 唯一一份（内容 = 最近一次成功保存 dataOf(3)）
-r = await callApi("/snap/restore", { method: "POST", headers: H, body: JSON.stringify({ key: target.key }) });
-const restored = await r.json();
-check("恢复成功且内容为最近一次保存", r.status === 200 && restored.data.folders[0].id === "f3", r.status + JSON.stringify(restored).slice(0, 120));
-check("恢复后 savedAt 为新时刻", restored.savedAt !== target.at, restored.savedAt);
-r = await callApi("/snap/restore", { method: "POST", headers: H, body: JSON.stringify({ key: "pt/data/other-uid/snap-1-xx.json" }) });
-check("恢复他人/不存在快照 404", r.status === 404, r.status);
+check("快照列表接口已移除 404", r.status === 404, r.status);
+r = await callApi("/snap/restore", { method: "POST", headers: H, body: JSON.stringify({ key: "pt/data/x/snap-1.json" }) });
+check("快照恢复接口已移除 404", r.status === 404, r.status);
+// 模拟存量快照键（老用户残留）：下一次保存应被顺手清空
+env.BUCKET.map.set(`pt/data/${uid}/snap-legacy.json`, { key: `pt/data/${uid}/snap-legacy.json`, body: "{}" });
+r = await callApi("/data", { method: "PUT", headers: { ...H, "X-Base-SavedAt": put3.savedAt }, body: JSON.stringify(dataOf(3)) });
+check("带存量快照仍可正常保存", r.status === 200, r.status);
+const snapKeys = [...env.BUCKET.map.keys()].filter((k) => k.includes("/snap-"));
+check("存量快照随保存清零", snapKeys.length === 0, JSON.stringify(snapKeys));
 
 console.log("— favicon 代理 —");
 globalThis.fetch = async (up) => {

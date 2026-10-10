@@ -23,7 +23,7 @@
 ```
 
 - **一套代码双端发布**：扩展（WXT 构建，manifest 继承 package.json 版本）与网页版（Vite 构建 dist-web）共享 `src/pages/newtab` 全部界面与逻辑
-- **平台差异收敛在 `src/platform.js`**：`openUrl`（扩展 chrome.tabs / 网页 window.open）、`getBrowserBookmarks`（仅扩展，读 chrome.bookmarks）
+- **平台差异收敛在 `src/platform.js`**：`openUrl`（扩展 chrome.tabs / 网页 window.open）、`getBrowserBookmarks`（仅扩展，读 chrome.bookmarks）、`getHistory`（仅扩展，读 chrome.history，仅本机）
 - 数据双向互通：扩展里改的收藏，网页版登录同 ID 即见
 
 ## 二、模块职责
@@ -40,10 +40,10 @@ src/pages/newtab/
     SettingsPanel.jsx     设置弹窗（外观 / 云同步 / 导入与备份 三 tab）
     board/
       layoutEngine.js     布局纯函数：v2 列式归一、v1→v2 迁移、槽位↔显示列换算
-      widgets.jsx         卡片部件（memo 化）：分组卡 / iframe 卡（⋯ 菜单、懒挂载）
+      widgets.jsx         卡片部件（memo 化）：分组卡 / iframe 卡（⋯ 菜单、懒挂载）/ 待办清单卡（勾选沉底、行内编辑、卡内把手拖拽）/ 浏览历史卡（仅扩展版，本机 chrome.history 实时查询）
       ManageSheet.jsx     卡片管理工作台：左树右列表（收录 / 批量 / 搜索 / 拖拽排序 / 批量移动 / 自动取名）
       FolderBrowser.jsx   子分组浏览浮层（面包屑 + 磁贴）
-      Popover.jsx         锚点定位浮层（⋯ 菜单等，portal 渲染、防裁剪防遮挡）
+      Popover.jsx         锚点定位浮层（⋯ 菜单等，portal 渲染、防裁剪防遮挡；实测内容尺寸定位与翻转，不用估算高度）
       GateScreen.jsx      登录门
   hooks/
     useCollection.js      云数据层（全部业务规则在此：认证、保存管线、冲突仲裁、CRUD、撤销）
@@ -70,6 +70,7 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 - dnd-kit 的落点检测依赖 IntersectionObserver 测量可放置矩形；且带来额外包体
 - 自研方案：悬停列 = x 落入的等宽区间；插入位 = 指针越过各卡中点。纯几何、零依赖、全平台一致
 - 容器宽度监听为 ResizeObserver + window resize 双监听（各一行）；拖拽直接写样式、不走 rAF——实现更少且足够流畅，拖拽更新有相等性守卫，不会渲染风暴
+- 待办清单卡的**卡内条目拖拽**沿用同一思路（把手 setPointerCapture + 行中点判定 + 本地让位序渲染，松手一次落库），与看板拖拽天然隔离——看板拖拽只认 `.board-widget-header`，卡内拖拽只从条目把手发起
 
 ### 3. 同步：整份覆盖 + 强制仲裁，而非合并
 
@@ -84,15 +85,17 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 ### 5. 代理而非直连：favicon / title
 
 - 浏览器跨域读不了第三方页面标题/图标（CORS）；国内直连 Google/DDG 图标服务不可靠
-- Worker 统一代理 + R2 缓存 30 天 + 限流，双端行为一致
+- Worker 统一代理 + R2 缓存 30 天 + 限流；浏览器 HTTP 缓存（命中 30 天 / 404 负缓存 1 天）让重复打开零请求，双端行为一致
 
 ## 四、性能策略清单
 
 | 策略 | 位置 | 收益 |
 |---|---|---|
 | 卡片组件 memo 化 | widgets.jsx | 开菜单/弹窗不再全树重渲染 |
+| 快慢双通道保存 + 启动新鲜窗 | useCollection | 云端请求数降约七成（省 Workers/R2 配额；关页 keepalive 兜底不丢改动） |
 | `content-visibility: auto` | .board-card CSS | 视口外卡片跳过渲染 |
-| iframe 懒挂载（滚入 ±300px 才加载，会话内不重载） | IframeWidget | 新标签页首屏只加载可见部件 |
+| iframe 懒挂载（滚入 ±300px 才加载，会话内不重载）+ 挂载错峰（多部件逐个拉起） | IframeWidget | 新标签页首屏只加载可见部件，且不并发挤占主线程/网络 |
+| font-display: optional + JS 预加载字体 | index.jsx / fonts.css | 重复打开零换字闪烁，首访尽早并行抓取 |
 | 拖拽直接改样式 + 相等性守卫 | BookmarkBoard | 拖拽零渲染风暴 |
 | GET 带 ETag → 304 | useCollection + worker | 开新标签页未变化时零流量 |
 | 静态资产 immutable 一年缓存 | worker | 冷启动免回源 |
@@ -103,7 +106,7 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 ## 五、Worker 与存储
 
 - Worker 名 `proton-collect-sync`，自定义域 sync.pathmemos.com（`wrangler.toml` 保存在部署机上、不入本仓库，兼容日期等以服务器配置为准）
-- R2 键布局：`pt/accounts/<uid>.json`（账号）、`pt/data/<uid>.json`（最新数据）、`pt/data/<uid>/snap-*.json`（快照 ×5）、`pt/favicons/<domain>.bin`、`pt/titles/<hash>.json`
+- R2 键布局：`pt/accounts/<uid>.json`（账号）、`pt/data/<uid>.json`（最新数据）、`pt/favicons/<domain>.bin`、`pt/titles/<hash>.json`
 - 绑定：`BUCKET`(R2)、`ASSETS`(静态资产，**必须显式 binding 且 run_worker_first=true**——缺省不注入 env.ASSETS、资产直出绕过 Worker，详见 AGENTS 部署节)、`SYNC_TOKEN`(云端 secret，会话/挑战签名)
 - 静态资产：Worker 托管 dist-web；`/assets/*` 一年 immutable，HTML no-store
 - 本地全量自测：`node scripts/test-worker.mjs`（内存 R2 模拟）；线上冒烟：`node scripts/test-auth.mjs`

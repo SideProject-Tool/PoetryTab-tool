@@ -20,3 +20,6 @@ dist-web
 # 开发用私钥（稳定扩展 ID 用，不入库）
 assets/dev-key.pem
 assets/dev-key.pub.txt
+
+# ZCode 会话产物（计划/截图流水线，不入库）
+.zcode/

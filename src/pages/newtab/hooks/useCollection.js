@@ -26,6 +26,13 @@ import { countLinks, mergeImportedTree } from "../services/bookmarks";
  *   同浏览器多标签页经 BroadcastChannel 广播保存结果：未编辑的标签页即时采纳最新数据，
  *   编辑中的标签页保持本地，由下一次保存的 409 进入仲裁。
  *
+ * 保存节奏（快慢双通道，控制云端请求量）：
+ *   快层  书签/分组/小部件/待办增删改、设置等 → 静止 3s 落库，持续编辑最长 30s 强制一次
+ *   慢层  待办勾选、布局拖拽、卡片显隐等「最终一致即可」的改动 → 5 分钟兜底；任何快层修改捎带
+ *   兜底  关页/切走立即上传（keepalive）；失败 30s 重试；「上传到云端」手动立即落库
+ *   拉取  打开新标签页时若缓存 10 分钟内有活动（fetchedAt）则跳过启动校验，
+ *         云端若已被推进由首次保存的 409 仲裁兜底，不会静默覆盖
+ *
  * 状态机 status：
  *   idle   未登录（显示引导门）
  *   boot   持会话启动恢复中
@@ -33,13 +40,16 @@ import { countLinks, mergeImportedTree } from "../services/bookmarks";
  *   ready  已就绪
  *   error  网络异常（error 必有可读信息）
  *
- * localStorage：pt.uid / pt.session / pt.cache（{uid, savedAt, dirty, data}，账号隔离）
+ * localStorage：pt.uid / pt.session / pt.cache（{uid, savedAt, dirty, fetchedAt, data}，账号隔离）
  */
 
 const UID_KEY = "pt.uid";
 const SESSION_KEY = "pt.session";
 const CACHE_KEY = "pt.cache";
-const SAVE_DEBOUNCE = 700;
+const SAVE_DEBOUNCE = 3000; // 快层：编辑静止后 3s 落库
+const SAVE_MAX_WAIT = 30000; // 快层：持续编辑期间最长 30s 强制落库一次
+const SAVE_LAZY_DEBOUNCE = 300000; // 慢通道：仅懒修改在途时 5 分钟兜底落库
+const GET_FRESH_MS = 600000; // 启动新鲜窗：缓存 10 分钟内有活动则跳过启动校验
 const ITER_DEFAULT = 600000;
 const FETCH_TIMEOUT = 15000; // 网络请求超时：避免挂死在 saving/boot
 
@@ -107,16 +117,6 @@ async function apiPutData(session, data, baseSavedAt) {
     body: JSON.stringify(data),
   });
 }
-async function apiListSnaps(session) {
-  return fetchJson(CLOUD_SYNC.url + "/api/snaps", { headers: { Authorization: `Bearer ${session}` } });
-}
-async function apiRestoreSnap(session, key) {
-  return fetchJson(CLOUD_SYNC.url + "/api/snap/restore", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ key }),
-  });
-}
 
 /* ---------- 本地缓存（账号隔离 + 版本号 + dirty 持久化） ---------- */
 /** 读取当前账号的缓存；缓存属其他账号（切换登录后的残留）时弃用，避免闪现他人收藏 */
@@ -126,7 +126,8 @@ function readCache(uid) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.uid !== uid || !parsed.data || !Array.isArray(parsed.data.folders)) return null;
-    return { savedAt: parsed.savedAt || "", dirty: !!parsed.dirty, data: ensureShape(parsed.data) };
+    // fetchedAt = 缓存最近一次写入时刻（读云/编辑/广播采纳都会刷新）；旧缓存缺省 0 = 视为过期，照常启动校验
+    return { savedAt: parsed.savedAt || "", dirty: !!parsed.dirty, data: ensureShape(parsed.data), fetchedAt: parsed.fetchedAt || 0 };
   } catch {
     return null;
   }
@@ -134,7 +135,7 @@ function readCache(uid) {
 function writeCache(uid, data, savedAt, dirty) {
   if (!uid) return;
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, savedAt: savedAt || "", dirty: !!dirty, data }));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, savedAt: savedAt || "", dirty: !!dirty, data, fetchedAt: Date.now() }));
   } catch { /* 容量不足时放弃缓存 */ }
 }
 function clearCache() {
@@ -145,6 +146,8 @@ function defaultData() {
     v: 1,
     folders: [{ id: genId("f"), title: "我的收藏", children: [] }],
     iframeWidgets: [],
+    todoWidgets: [],
+    historyWidgets: [],
     settings: { ...SETTINGS_DEFAULTS },
     layout: { v: 2, cols: [[], [], [], [], []] },
   };
@@ -171,6 +174,8 @@ function ensureShape(d) {
     v: d.v || 1,
     folders,
     iframeWidgets: normList(d.iframeWidgets),
+    todoWidgets: normList(d.todoWidgets),
+    historyWidgets: normList(d.historyWidgets),
     layout: d.layout ?? { v: 2, cols: [[], [], [], [], []] },
     settings,
   };
@@ -220,7 +225,9 @@ export function useCollection() {
   saveStateRef.current = saveState;
   const [savedAt, setSavedAt] = useState(() => cachedBoot.current?.savedAt || "");
   const dataRef = useRef(data);
-  const saveTimer = useRef(null);
+  const saveTimer = useRef(null); // 保存防抖定时器（快层 3s / 慢层 5min 共用）
+  const maxWaitTimer = useRef(null); // 快层强制落库定时器（持续编辑期最长 30s 一次）
+  const pendingFastRef = useRef(false); // 快层修改在途（慢修改不重置快层节奏，由快保存捎带）
   const baseSavedAtRef = useRef(cachedBoot.current?.savedAt || ""); // 乐观锁：客户端持有的云端版本
   const dirtyRef = useRef(!!cachedBoot.current?.dirty); // 有未落库的本地改动
   const conflictCloudSavedAtRef = useRef(""); // 冲突时云端的版本号：强制「以本地为准」上传时使用
@@ -358,6 +365,15 @@ export function useCollection() {
     let alive = true;
     (async () => {
       const cached = cachedBoot.current;
+      /* 启动新鲜窗：缓存近期有过活动（读云/编辑/广播采纳）则信任本地、跳过启动校验省请求。
+         云端若已被其他设备推进，首次保存携旧版本号会 409 → 强制仲裁兜底，不存在静默覆盖 */
+      if (cached && Date.now() - (cached.fetchedAt || 0) < GET_FRESH_MS) {
+        dirtyRef.current = !!cached.dirty;
+        baseSavedAtRef.current = cached.savedAt || "";
+        setSavedAt(cached.savedAt || "");
+        setStatus("ready");
+        return;
+      }
       const r = await apiGetData(sessionRef.current, cached?.savedAt);
       if (!alive) return;
       if (r.status === 304) {
@@ -416,23 +432,47 @@ export function useCollection() {
     return () => { alive = false; };
   }, [resetToIdle]);
 
-  /* 保存调度 */
-  const scheduleSave = useCallback(() => {
+  /* 保存调度（快慢双通道，控制云端请求量）：
+     快层（默认）= 静止 3s 落库 + 持续编辑 30s 强制上限；
+     慢层（opts.lazy：待办勾选/布局/显隐等最终一致改动）= 5 分钟兜底；
+     任一定时器触发即整份落库（单飞队列），快保存天然捎带在途懒改动 */
+  const clearSaveTimers = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    if (maxWaitTimer.current) { clearTimeout(maxWaitTimer.current); maxWaitTimer.current = null; }
+    pendingFastRef.current = false;
+  }, []);
+  const scheduleSave = useCallback((opts = {}) => {
+    if (opts.lazy) {
+      if (saveTimer.current || maxWaitTimer.current) return; // 已有待落库定时：保持原节奏，届时捎带
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null;
+        enqueueSave(dataRef.current);
+      }, SAVE_LAZY_DEBOUNCE);
+      return;
+    }
+    pendingFastRef.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      pendingFastRef.current = false;
+      if (maxWaitTimer.current) { clearTimeout(maxWaitTimer.current); maxWaitTimer.current = null; }
       enqueueSave(dataRef.current);
     }, SAVE_DEBOUNCE);
+    if (!maxWaitTimer.current) {
+      maxWaitTimer.current = setTimeout(() => {
+        maxWaitTimer.current = null;
+        if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+        pendingFastRef.current = false;
+        enqueueSave(dataRef.current);
+      }, SAVE_MAX_WAIT);
+    }
   }, []);
   const saveNow = useCallback(async () => {
     if (!sessionRef.current || !dataRef.current) return;
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
+    clearSaveTimers();
     enqueueSave(dataRef.current);
     await saveChain;
-  }, []);
+  }, [clearSaveTimers]);
 
   /* 保存失败自动重试：每 30s 重发直到成功（conflict 需用户手动抉择、413 为确定性失败，均不自动重试） */
   useEffect(() => {
@@ -444,8 +484,8 @@ export function useCollection() {
     return () => clearInterval(t);
   }, [saveState]);
 
-  /** 所有修改经此入口：变更 → 防抖自动保存。冲突待仲裁期间只改本地、暂停自动保存 */
-  const mutate = useCallback((fn) => {
+  /** 所有修改经此入口：变更 → 防抖自动保存（opts.lazy = 走慢通道）。冲突待仲裁期间只改本地、暂停自动保存 */
+  const mutate = useCallback((fn, opts = {}) => {
     if (!sessionRef.current) return;
     dirtyRef.current = true;
     oversizeRef.current = false; // 数据再次变化：恢复正常保存管线（413 后精简数据的恢复路径）
@@ -456,7 +496,7 @@ export function useCollection() {
       writeCache(uidRef.current, next, baseSavedAtRef.current, true);
       return next;
     });
-    if (saveStateRef.current !== "conflict") scheduleSave();
+    if (saveStateRef.current !== "conflict") scheduleSave(opts);
   }, [scheduleSave]);
 
   /* 关页/切走前的兜底落库：防抖窗口内关闭标签页也不丢改动（keepalive 尽力而为） */
@@ -465,10 +505,7 @@ export function useCollection() {
       if (!dirtyRef.current || !sessionRef.current || !dataRef.current) return;
       if (saveStateRef.current === "conflict") return; // 冲突待用户抉择，不自动以本地覆盖云端
       if (oversizeRef.current) return; // 413 超限：发了也会失败，不浪费 keepalive 请求
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-      }
+      clearSaveTimers();
       try {
         const body = JSON.stringify(dataRef.current);
         // keepalive 请求体字节上限约 64KB：超限退回普通 fetch（尽力而为）
@@ -630,34 +667,7 @@ export function useCollection() {
     return { ok: true };
   }, [clearAuth, resetToIdle]);
 
-  /* 历史快照：列表 + 恢复（恢复动作在服务端也留快照，可再次撤销） */
-  const listSnaps = useCallback(async () => {
-    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
-    const r = await apiListSnaps(sessionRef.current);
-    if (r.status === 200 && r.json && Array.isArray(r.json.snaps)) return { ok: true, snaps: r.json.snaps };
-    if (r.status === 401) { resetToIdle(); return { ok: false, error: "登录已过期，请重新登录" }; }
-    return { ok: false, error: r.status === 0 ? "网络异常" : `云端异常 (HTTP ${r.status})` };
-  }, [resetToIdle]);
-  const restoreSnap = useCallback(async (key) => {
-    if (!sessionRef.current) return { ok: false, error: "尚未登录" };
-    const r = await apiRestoreSnap(sessionRef.current, key);
-    if (r.status === 200 && r.json && r.json.data) {
-      const d = ensureShape(r.json.data);
-      dataRef.current = d;
-      setData(d);
-      baseSavedAtRef.current = r.json.savedAt || "";
-      dirtyRef.current = false;
-      conflictCloudSavedAtRef.current = "";
-      writeCache(uidRef.current, d, baseSavedAtRef.current, false);
-      setSavedAt(baseSavedAtRef.current);
-      setSaveState("saved");
-      setError("");
-      broadcastSync({ type: "sync", uid: uidRef.current, savedAt: baseSavedAtRef.current, data: d });
-      return { ok: true };
-    }
-    if (r.status === 401) { resetToIdle(); return { ok: false, error: "登录已过期，请重新登录" }; }
-    return { ok: false, error: r.status === 0 ? "网络异常" : `恢复失败 (HTTP ${r.status})` };
-  }, [resetToIdle]);
+  /* 历史快照功能已下线：listSnaps/restoreSnap 已随服务端接口一并移除 */
 
   /** 整份替换（导入备份/书签）：立即以本地为准上传；冲突状态下借用云端版本号完成覆盖 */
   const replaceAll = useCallback(async (imported) => {
@@ -737,16 +747,27 @@ export function useCollection() {
   const addIframe = useCallback((widget) => mutate((d) => ({ ...d, iframeWidgets: [...(d.iframeWidgets || []), { id: genId("iw"), ...widget }] })), [mutate]);
   const removeIframe = useCallback((id) => removeWithUndo("已删除小部件", () => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).filter((w) => w.id !== id) }))), [mutate, removeWithUndo]);
   const updateIframe = useCallback((id, patch) => mutate((d) => ({ ...d, iframeWidgets: (d.iframeWidgets || []).map((w) => (w.id === id ? { ...w, ...patch } : w)) })), [mutate]);
-  const setLayout = useCallback((layout) => mutate((d) => ({ ...d, layout })), [mutate]);
-  const setSettings = useCallback((patch) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } })), [mutate]);
+  const addTodo = useCallback((widget) => mutate((d) => ({ ...d, todoWidgets: [...(d.todoWidgets || []), { id: genId("td"), items: [], ...widget }] })), [mutate]);
+  const removeTodo = useCallback((id) => removeWithUndo("已删除待办清单", () => mutate((d) => ({ ...d, todoWidgets: (d.todoWidgets || []).filter((w) => w.id !== id) }))), [mutate, removeWithUndo]);
+  /** opts.lazy：勾选切换等最终一致改动走慢通道（增删/改文字不传，保持快层） */
+  const updateTodo = useCallback((id, patch, opts) => mutate((d) => ({ ...d, todoWidgets: (d.todoWidgets || []).map((w) => (w.id === id ? { ...w, ...patch } : w)) }), opts), [mutate]);
+  const addHistory = useCallback((widget) => mutate((d) => ({ ...d, historyWidgets: [...(d.historyWidgets || []), { id: genId("wh"), ...widget }] })), [mutate]);
+  const removeHistory = useCallback((id) => removeWithUndo("已删除小部件", () => mutate((d) => ({ ...d, historyWidgets: (d.historyWidgets || []).filter((w) => w.id !== id) }))), [mutate, removeWithUndo]);
+  const updateHistory = useCallback((id, patch) => mutate((d) => ({ ...d, historyWidgets: (d.historyWidgets || []).map((w) => (w.id === id ? { ...w, ...patch } : w)) })), [mutate]);
+  /** 布局拖拽走慢通道：最终一致即可，关页时有 keepalive 兜底 */
+  const setLayout = useCallback((layout) => mutate((d) => ({ ...d, layout }), { lazy: true }), [mutate]);
+  /** opts.lazy：低频且不急的设置项（如卡片显隐）可走慢通道；常规设置不传保持快层 */
+  const setSettings = useCallback((patch, opts) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } }), opts), [mutate]);
 
   return {
     uid, hasUid, data, status, error, saveState, savedAt, oversize,
     login, register, reload, saveNow, logout,
-    listSnaps, restoreSnap, replaceAll, importBookmarks,
+    replaceAll, importBookmarks,
     addItem, addItems, addFolder, renameNode, updateNode, removeNode, reorderNode, moveNodesTo,
 
     addIframe, removeIframe, updateIframe,
+    addTodo, removeTodo, updateTodo,
+    addHistory, removeHistory, updateHistory,
     setLayout, setSettings,
     undoInfo, undoRemove, dismissUndo,
   };
