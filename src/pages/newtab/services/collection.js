@@ -1,6 +1,6 @@
 /**
  * 收藏数据树的纯函数操作（全部返回新引用，配合 React）。
- * 数据形状：{ folders: [ {id, title, children: [书签|子文件夹]} ], iframeWidgets, settings, layout }
+ * 数据形状：{ folders: [ {id, title, children: [书签|子文件夹]} ], iframeWidgets, todoWidgets, historyWidgets, settings, poemLib, layout }
  * 书签 = { id, title, url, dateAdded }
  */
 
@@ -13,6 +13,7 @@ export const SETTINGS_DEFAULTS = {
   poemSpace: 0, // 诗词区最小高度（像素，0=自然高度）；诗词在区域内垂直居中，下方内容随之整体下移
   pageBgLight: "", // 浅色主题页面底色（#RGB/#RRGGBB，空=主题默认）
   pageBgDark: "", // 深色主题页面底色（空=主题默认）
+  syncFreq: 10, // 启动校验频率（分钟）：开新标签页时超过该间隔才向云端校验一次（10/30/60）
 };
 
 function uid(prefix) {
@@ -155,6 +156,85 @@ export function flattenForSearch(folders) {
   };
   walk(folders, []);
   return out;
+}
+
+/* ---------- 词库（poemLib）：内置语料只读，删除=隐藏、修改=覆盖；自定义词条独立存放 ---------- */
+
+export const POEM_LIB_DEFAULTS = { custom: [], hidden: [], edits: {}, rev: 0 };
+
+/** 云端 poemLib 兜底归一：畸形字段回默认、条目字段取字符串、空内容词条丢弃（ensureShape 单点调用） */
+export function normalizePoemLib(lib) {
+  if (!lib || typeof lib !== "object") return { ...POEM_LIB_DEFAULTS, edits: {} };
+  const str = (v) => (typeof v === "string" ? v : "");
+  const custom = (Array.isArray(lib.custom) ? lib.custom : [])
+    .filter((x) => x && typeof x === "object" && typeof x.uuid === "string" && str(x.content).trim())
+    .map((x) => ({
+      uuid: x.uuid,
+      cat: typeof x.cat === "string" ? x.cat : "i",
+      content: str(x.content),
+      author: str(x.author),
+      source: str(x.source),
+    }));
+  const hidden = (Array.isArray(lib.hidden) ? lib.hidden : []).filter((x) => typeof x === "string" && x);
+  const edits = {};
+  if (lib.edits && typeof lib.edits === "object") {
+    for (const [uuid, patch] of Object.entries(lib.edits)) {
+      if (typeof uuid === "string" && patch && typeof patch === "object" && str(patch.content).trim()) {
+        edits[uuid] = { content: str(patch.content), author: str(patch.author), source: str(patch.source) };
+      }
+    }
+  }
+  return { custom, hidden, edits, rev: Number.isFinite(lib.rev) ? lib.rev : 0 };
+}
+
+/** 词库修改统一入口：归一现有值 → 应用变更 → rev+1（引擎据此重新洗牌） */
+function bumpLib(data, fn) {
+  const next = fn(normalizePoemLib(data.poemLib));
+  return { ...data, poemLib: { ...next, rev: (next.rev || 0) + 1 } };
+}
+
+/** 新增自定义词条（内容必填由调用方校验；uuid 用 u_ 前缀避免与内置 UUID 冲突） */
+export function addCustomPoem(data, { cat, content, author, source }) {
+  const entry = {
+    uuid: uid("u"),
+    cat,
+    content: content.trim(),
+    author: (author || "").trim(),
+    source: (source || "").trim(),
+  };
+  return bumpLib(data, (lib) => ({ ...lib, custom: [entry, ...lib.custom] }));
+}
+
+/** 修改词条：自定义条目直接改；内置条目写 edits 覆盖（归属由 custom 是否含该 uuid 决定） */
+export function updatePoemEntry(data, uuid, patch) {
+  const norm = {
+    content: (patch.content || "").trim(),
+    author: (patch.author || "").trim(),
+    source: (patch.source || "").trim(),
+  };
+  return bumpLib(data, (lib) => {
+    if (lib.custom.some((c) => c.uuid === uuid)) {
+      return { ...lib, custom: lib.custom.map((c) => (c.uuid === uuid ? { ...c, ...norm } : c)) };
+    }
+    return { ...lib, edits: { ...lib.edits, [uuid]: norm } };
+  });
+}
+
+/** 删除自定义词条（内置条目用 setPoemHidden 隐藏/恢复） */
+export function removeCustomPoem(data, uuid) {
+  return bumpLib(data, (lib) => ({ ...lib, custom: lib.custom.filter((c) => c.uuid !== uuid) }));
+}
+
+/** 内置词条隐藏/恢复 */
+export function setPoemHidden(data, uuid, hidden) {
+  return bumpLib(data, (lib) => ({
+    ...lib,
+    hidden: hidden
+      ? lib.hidden.includes(uuid)
+        ? lib.hidden
+        : [...lib.hidden, uuid]
+      : lib.hidden.filter((u) => u !== uuid),
+  }));
 }
 
 export { uid as genId };

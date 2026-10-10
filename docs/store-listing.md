@@ -11,7 +11,7 @@
 | 文件 | 用途 |
 |---|---|
 | `.output/poetrytab-tool-<版本>-chrome.zip`（由 `STORE_BUILD=1 pnpm zip` 生成，约 3.3MB） | Chrome Web Store 与 Edge Add-ons 共用上传包（MV3，无 key） |
-| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（1280×800）⚠️ 现存 chrome/edge 两张截图均为旧版界面，**需重截**。已备好三张新模拟截图（`store/shot-1-login` / `shot-2-poetry-board` / `shot-3-poetry-board-widgets`，均为 1280×800，演示数据生成）：审核通过后重命名为本文件名与 edge 对应尺寸使用 |
+| `store/screenshot-chrome-1280x800.png` | Chrome 商店截图（1280×800）⚠️ 现存 chrome/edge 两张截图均为旧版界面，**需重截**。已备好三张新模拟截图（`store/shot-1-login` / `shot-2-poetry-board` / `shot-3-poetry-board-widgets`，均为 1280×800，演示数据生成）：审核通过后重命名为本文件名与 edge 对应尺寸使用。⚠️ 顶部诗词区已改为「诗句 + 作者署名」（原「点一下换一首」提示行已移除），上述三张模拟截图中诗词区也已过期，重截时一并更新；设置弹窗新增「词库管理」标签页（含词库增删改表格），如截图涉及设置面板亦需同步重截 |
 | `store/screenshot-edge-1080x680.png` | Edge 商店截图（1080×680）⚠️ 同上 |
 | `store/logo-edge-300x300.png` | Edge 商店 Logo（300×300） |
 

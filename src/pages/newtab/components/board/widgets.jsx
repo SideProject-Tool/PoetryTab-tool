@@ -232,6 +232,12 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
   const aliveRef = useRef(true); // 卸载后作废错峰队列里残留的挂载回调
   const queuedRef = useRef(false); // 已入队待挂载，防止重复排队
   useEffect(() => () => { aliveRef.current = false; }, []);
+  // 预热目标站点连接：挂载即 preconnect（不等滚入），滚入时 iframe 直连已握手完毕。
+  // React 19 自动把 <link rel=preconnect> 提升到 <head> 并按 href 去重
+  const iframeOrigin = useMemo(() => {
+    const u = safeUrl(widget.url);
+    try { return u ? new URL(u).origin : ""; } catch { return ""; }
+  }, [widget.url]);
 
   const commitTitle = (t) => {
     setRenaming(false);
@@ -279,6 +285,7 @@ const IframeWidgetBase = ({ widget, onRemove, onUpdate, dragHandle }) => {
 
   return (
     <div className="board-widget board-widget-iframe">
+      {iframeOrigin && <link rel="preconnect" href={iframeOrigin} />}
       <div className="board-widget-header" title="按住拖动排序" ref={dragHandle?.ref} {...(dragHandle?.props || {})}>
         {renaming ? (
           <TitleEdit initial={widget.title || ""} onCommit={commitTitle} onCancel={() => setRenaming(false)} />

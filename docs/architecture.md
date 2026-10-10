@@ -36,8 +36,10 @@ src/pages/newtab/
   grid.js                 列数常量与自适应函数（<640 单列）
   components/
     BookmarkBoard.jsx     看板编排：列容器、自研指针拖拽、FAB、弹窗调度
-    BookmarkSearch.jsx    搜索（拼音索引按需加载 pinyin-pro）
-    SettingsPanel.jsx     设置弹窗（外观 / 云同步 / 导入与备份 三 tab）
+    BookmarkSearch.jsx    搜索（拼音索引按需加载 pinyin-pro；组件本身也按需懒加载）
+    SettingsPanel.jsx     设置入口（齿轮按钮常驻主包；点开才懒加载弹窗主体）
+    SettingsModal.jsx     设置弹窗主体（外观 / 云同步 / 导入与备份 / 词库管理 四 tab；懒加载 chunk）
+    PoemLibManager.jsx    词库管理面板（分类切换 + 表格增删改 + 搜索分页；内置删=隐藏可恢复、改=覆盖）
     board/
       layoutEngine.js     布局纯函数：v2 列式归一、v1→v2 迁移、槽位↔显示列换算
       widgets.jsx         卡片部件（memo 化）：分组卡 / iframe 卡（⋯ 菜单、懒挂载）/ 待办清单卡（勾选沉底、行内编辑、卡内把手拖拽）/ 浏览历史卡（仅扩展版，本机 chrome.history 实时查询）
@@ -47,11 +49,11 @@ src/pages/newtab/
       GateScreen.jsx      登录门
   hooks/
     useCollection.js      云数据层（全部业务规则在此：认证、保存管线、冲突仲裁、CRUD、撤销）
-    useContentEngine.js   诗词引擎（分类加载、洗牌轮播）
+    useContentEngine.js   诗词引擎（分类加载、词库合并按 rev 感知、洗牌轮播）
   services/
-    collection.js         数据契约纯函数（树操作、safeUrl 白名单、搜索展平）
+    collection.js         数据契约纯函数（树操作、safeUrl 白名单、搜索展平、poemLib 词库操作与归一）
     bookmarks.js          书签导入（Netscape HTML 解析、去重合并）
-    contentEngine.js      诗词源（12 分类按需 chunk）
+    contentEngine.js      诗词源（12 分类按需 chunk + 用户词库合并）
     meta.js               网页标题代理客户端
     constants.js          端点 / 引擎 / 主题常量
 worker/src/worker.js       同步 API 全部实现（部署源）
@@ -102,6 +104,10 @@ worker/src/worker.js       同步 API 全部实现（部署源）
 | HTML no-store | worker | 发版即时生效 |
 | 江西拙楷字体子集化（subset-zhuokai.mjs） | assets/fonts | 字体只含实际用字 |
 | 诗词分类按需 chunk | contentEngine.js | 只加载启用的分类 |
+| 词库修改=隐藏+覆盖（不动内置语料） | poemLib（collection.js） | 内置语料包升级不丢用户修改；rev 单调递增驱动轮播重洗，免全量比对 |
+| 低频界面懒加载（设置弹窗/搜索浮层/管理工作台/子分组浏览） | React.lazy 拆 chunk | 主包瘦身约三成，新标签页首帧更快；点开对应功能才有一次性加载 |
+| iframe 挂载即 preconnect | IframeWidget | 滚入视口前完成 DNS/TLS 握手，iframe 加载体感更快 |
+| 启动校验频率可配置 | settings.syncFreq | 请求量与跨设备新鲜度自选平衡（10/30/60 分钟）；数据安全始终由 409 仲裁兜底 |
 
 ## 五、Worker 与存储
 

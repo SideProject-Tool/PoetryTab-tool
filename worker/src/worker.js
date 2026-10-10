@@ -345,7 +345,7 @@ async function handleApi(request, env, url) {
           customMetadata: { contentType, fetchedAt: String(Date.now()) },
         }).catch(() => { /* 缓存写失败不影响本次返回 */ });
         return new Response(buf, {
-          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=604800", ...CORS_HEADERS },
+          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=2592000", ...CORS_HEADERS },
         });
       } catch { /* 换下一个回源 */ }
     }
@@ -353,7 +353,8 @@ async function handleApi(request, env, url) {
   }
 
   /* 标题代理：/api/title?url=https://example.com
-     收录书签未填名称时自动取网页 <title>。R2 缓存 30 天；仅读前 256KB、10s 超时，防大页面拖垮 */
+     收录书签未填名称时自动取网页 <title>。R2 缓存 30 天；仅读前 256KB、10s 超时，防大页面拖垮。
+     浏览器缓存：命中 7 天、404 负缓存 1 天（标题短少变化，重复收录/重复打开零请求） */
   if (p === "/api/title" && request.method === "GET") {
     const raw = url.searchParams.get("url") || "";
     let target;
@@ -371,7 +372,7 @@ async function handleApi(request, env, url) {
       try {
         const c = await cached.json();
         if (c && c.title && Date.now() - Number(c.fetchedAt || 0) < FAVICON_TTL * 1000) {
-          return json({ title: c.title });
+          return json({ title: c.title }, 200, { "Cache-Control": "public, max-age=604800" });
         }
       } catch { /* 缓存损坏走回源 */ }
     }
@@ -403,9 +404,9 @@ async function handleApi(request, env, url) {
         }
       }
     } catch { /* 抓取失败按无标题处理 */ }
-    if (!title) return json({ error: "title not found" }, 404);
+    if (!title) return json({ error: "title not found" }, 404, { "Cache-Control": "public, max-age=86400" });
     await env.BUCKET.put(key, JSON.stringify({ title, fetchedAt: String(Date.now()) })).catch(() => {});
-    return json({ title });
+    return json({ title }, 200, { "Cache-Control": "public, max-age=604800" });
   }
 
   return json({ error: "not found" }, 404);

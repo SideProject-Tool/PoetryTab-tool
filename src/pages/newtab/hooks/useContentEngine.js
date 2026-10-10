@@ -4,6 +4,7 @@ import { contentEngine } from "../services/contentEngine";
 const STORAGE_KEY_ORDER = "poemShuffledOrder";
 const STORAGE_KEY_INDEX = "poemCurrentIndex";
 const STORAGE_KEY_LAST_CATEGORIES = "poemLastCategories";
+const STORAGE_KEY_LIB_REV = "poemLibRev";
 
 function formatContentForDisplay(content) {
   // 保留诗词完整原文（含标点），仅在展示时按标点对折换行
@@ -25,15 +26,21 @@ function shuffle(arr) {
   return a;
 }
 
-/** 分类变化后强制重新洗牌，避免旧顺序越界 */
-function ensureDataFreshness(selectedCategories) {
+/** 分类或词库（rev）变化后强制重新洗牌，避免旧顺序越界/漏新词条 */
+function ensureDataFreshness(selectedCategories, libRev) {
   const storedCatsJson = localStorage.getItem(STORAGE_KEY_LAST_CATEGORIES);
   const currentCatsJson = JSON.stringify(selectedCategories);
+  let updated = false;
   if (storedCatsJson !== currentCatsJson) {
     localStorage.setItem(STORAGE_KEY_LAST_CATEGORIES, currentCatsJson);
-    return true;
+    updated = true;
   }
-  return false;
+  const storedRev = localStorage.getItem(STORAGE_KEY_LIB_REV);
+  if (storedRev !== String(libRev)) {
+    localStorage.setItem(STORAGE_KEY_LIB_REV, String(libRev));
+    updated = true;
+  }
+  return updated;
 }
 
 function reshuffleAndSave(contents) {
@@ -45,23 +52,26 @@ function reshuffleAndSave(contents) {
 }
 
 /**
- * 诗词引擎：按启用分类加载诗词库，顺序洗牌轮播（一轮不重复）。
- * 只暴露「当前诗词 + 换一首」两个能力。
+ * 诗词引擎：按启用分类加载诗词库并套用用户词库（自定义/隐藏/覆盖编辑），顺序洗牌轮播（一轮不重复）。
+ * 只暴露「当前诗词 + 换一首」两个能力。词库以 rev 计版本：rev 变化即重载内容并重新洗牌。
  */
-export function useContentEngine(selectedCategories = ["i"]) {
+export function useContentEngine(selectedCategories = ["i"], poemLib = null) {
   const [currentContent, setCurrentContent] = useState(null);
   const contentsRef = useRef([]);
   const contentsCatsRef = useRef("");
   const loadTokenRef = useRef(0);
+  const libRef = useRef(poemLib);
+  libRef.current = poemLib;
+  const libRev = poemLib?.rev || 0;
 
   const getRandomContent = useCallback(async () => {
     const token = ++loadTokenRef.current;
-    const catsKey = selectedCategories.join(",");
+    const catsKey = selectedCategories.join(",") + "@" + libRev;
     try {
-      const isUpdated = ensureDataFreshness(selectedCategories);
+      const isUpdated = ensureDataFreshness(selectedCategories, libRev);
       let contents = contentsCatsRef.current === catsKey ? contentsRef.current : [];
       if (!contents.length) {
-        const loaded = await contentEngine.getContentByCategories(selectedCategories);
+        const loaded = await contentEngine.getContentByCategories(selectedCategories, libRef.current);
         if (token !== loadTokenRef.current) return null;
         contents = contentEngine.reduceNoise(loaded);
         contentsCatsRef.current = catsKey;
@@ -112,7 +122,7 @@ export function useContentEngine(selectedCategories = ["i"]) {
       console.error("Failed to get random content:", error);
       return null;
     }
-  }, [selectedCategories]);
+  }, [selectedCategories, libRev]);
 
   return { currentContent, getRandomContent };
 }

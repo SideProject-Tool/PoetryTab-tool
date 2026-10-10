@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
   IoAddOutline as AddIcon,
   IoCloseOutline as CloseIcon,
@@ -12,9 +12,11 @@ import { IS_EXT } from "../../../platform";
 import { colsForWidth, REF_SLOTS } from "../grid";
 import { GAP, defaultCardH, normalizeLayout, migrateV1Layout, visibleColumns, columnsToLayout } from "./board/layoutEngine";
 import { GroupWidget, IframeWidget, TodoWidget, HistoryWidget } from "./board/widgets";
-import ManageSheet from "./board/ManageSheet";
-import FolderBrowser from "./board/FolderBrowser";
 import GateScreen from "./board/GateScreen";
+
+// 管理工作台 / 子分组浏览只在用户主动打开时才用到：按需懒加载，不占新标签页主包
+const ManageSheet = lazy(() => import("./board/ManageSheet"));
+const FolderBrowser = lazy(() => import("./board/FolderBrowser"));
 
 /*
  * 云端收藏看板（插件版与网页版共用这一个组件）—— v2 列式布局。
@@ -543,9 +545,11 @@ export default function BookmarkBoard({ col }) {
         </div>
       )}
 
-      {manage && <ManageSheet col={col} target={manage} onClose={() => setManage(null)} />}
+      {manage && <Suspense fallback={null}><ManageSheet col={col} target={manage} onClose={() => setManage(null)} /></Suspense>}
       {browsing && (
-        <FolderBrowser folderId={browsing} data={data} onClose={() => setBrowsing(null)} />
+        <Suspense fallback={null}>
+          <FolderBrowser folderId={browsing} data={data} onClose={() => setBrowsing(null)} />
+        </Suspense>
       )}
     </div>
   );

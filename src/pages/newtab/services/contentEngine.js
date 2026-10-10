@@ -34,6 +34,23 @@ export function getCategoryInfo(categoryKey) {
   return CATEGORIES.find((cat) => cat.key === categoryKey) || { name: categoryKey, key: categoryKey };
 }
 
+// 「佚名/无名氏/无名者/原创」视为未署名，不作为作者或出处展示
+const PLACEHOLDER_VALUES = new Set(["", "佚名", "无名氏", "无名者", "原创"]);
+
+function nonPlaceholder(value) {
+  const trimmed = (value || "").trim();
+  return PLACEHOLDER_VALUES.has(trimmed) ? "" : trimmed;
+}
+
+/** 署名行：优先作者「— 作者 —」，无作者回退作品名「— 《作品名》 —」，两者皆缺为空 */
+function buildAttribution(fromWho, from) {
+  const author = nonPlaceholder(fromWho);
+  if (author) return `— ${author} —`;
+  const source = nonPlaceholder(from);
+  if (source) return `— 《${source}》 —`;
+  return "";
+}
+
 function normalizeContent(content, categoryKey) {
   return {
     ...content,
@@ -42,21 +59,42 @@ function normalizeContent(content, categoryKey) {
     displayTitle: content.hitokoto || "",
     displaySource: content.from || "",
     displayAuthor: content.from_who || "",
+    displayAttribution: buildAttribution(content.from_who, content.from),
   };
 }
 
 export const contentEngine = {
-  /** 合并多个分类的诗词（按 uuid 去重） */
-  async getContentByCategories(categories = ["i"]) {
+  /**
+   * 合并多个分类的诗词（按 uuid 去重），并套用用户词库 poemLib：
+   * 内置列表 → 剔除 hidden → 命中 edits 的按 content/author/source 覆盖 → 追加已启用分类的自定义词条
+   */
+  async getContentByCategories(categories = ["i"], poemLib = null) {
     const seen = new Set();
+    const hidden = new Set(poemLib?.hidden || []);
+    const edits = poemLib?.edits || {};
+    const customs = poemLib?.custom || [];
+    const catSet = new Set(categories);
     const contents = [];
     for (const cat of categories) {
       const list = await loadCategoryData(cat);
       for (const item of list) {
-        if (!seen.has(item.uuid)) {
-          seen.add(item.uuid);
-          contents.push(normalizeContent(item, cat));
-        }
+        if (seen.has(item.uuid) || hidden.has(item.uuid)) continue;
+        seen.add(item.uuid);
+        const e = edits[item.uuid];
+        contents.push(
+          normalizeContent(
+            e ? { ...item, hitokoto: e.content, from_who: e.author, from: e.source } : item,
+            cat
+          )
+        );
+      }
+    }
+    for (const c of customs) {
+      if (catSet.has(c.cat) && !seen.has(c.uuid)) {
+        seen.add(c.uuid);
+        contents.push(
+          normalizeContent({ uuid: c.uuid, hitokoto: c.content, from_who: c.author, from: c.source }, c.cat)
+        );
       }
     }
     return contents;

@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy, Component } from "react";
 import "./App.css";
-import BookmarkSearch from "./components/BookmarkSearch";
 import BookmarkBoard from "./components/BookmarkBoard";
 import SettingsPanel from "./components/SettingsPanel";
 import { useCollection } from "./hooks/useCollection";
@@ -9,6 +8,9 @@ import { useContentEngine } from "./hooks/useContentEngine";
 import { flattenForSearch, safeUrl } from "./services/collection";
 import { openUrl } from "../../platform";
 import { IoSearchOutline as SearchIcon, IoCloseOutline as CloseIcon } from "react-icons/io5";
+
+// 搜索浮层只在呼出时才用到：按需懒加载，不占新标签页主包
+const BookmarkSearch = lazy(() => import("./components/BookmarkSearch"));
 
 /* 渲染异常兜底：数据损坏时给出可操作的恢复入口，避免整页白屏 */
 class ErrorBoundary extends Component {
@@ -115,8 +117,8 @@ export default function App() {
 
   const toggleSearch = useCallback(() => setSearchOpen((o) => !o), []);
 
-  /* 诗词：按展示类别随机抽取，点击换一首 */
-  const { getRandomContent, currentContent } = useContentEngine(settings.cats);
+  /* 诗词：按展示类别随机抽取（套用词库管理的自定义/隐藏/覆盖），点击换一首 */
+  const { getRandomContent, currentContent } = useContentEngine(settings.cats, col.data ? col.data.poemLib : null);
   const [poem, setPoem] = useState(null);
   const [poemFading, setPoemFading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false); // 默认隐藏（诗词区留白）；S 呼出 / 云端设置常驻
@@ -143,6 +145,7 @@ export default function App() {
   const engine = SEARCH_ENGINES[settings.engine] || SEARCH_ENGINES.baidu;
   const poemQuery = poem ? [poem.title, poem.from, poem.who].filter(Boolean).join(" ") : "";
   const poemSearchHref = poemQuery ? engine.url + encodeURIComponent(poemQuery.trim()) : undefined;
+  const poemAttribution = poem ? poem.displayAttribution || "" : "";
 
   /* 全局搜索数据源：分组内全部书签（含所在分组路径） */
   const searchItems = useMemo(() => {
@@ -168,10 +171,10 @@ export default function App() {
           {poem ? poem.title : ""}
         </div>
         <div className="pc-poem-hint">
-          <span>— 点一下换一首 —</span>
+          {poemAttribution && <span className="pc-poem-author">{poemAttribution}</span>}
           {poemSearchHref && (
             <>
-              <span> · </span>
+              {poemAttribution && <span> · </span>}
               <a
                 className="pc-poem-search"
                 href={poemSearchHref}
@@ -199,7 +202,9 @@ export default function App() {
       {searchOpen && (
         <div className="pc-search-overlay" onClick={() => setSearchOpen(false)}>
           <div className="pc-toolbar" onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }} onClick={(e) => e.stopPropagation()}>
-            <BookmarkSearch items={searchItems} engine={engine} />
+            <Suspense fallback={null}>
+              <BookmarkSearch items={searchItems} engine={engine} />
+            </Suspense>
           </div>
         </div>
       )}

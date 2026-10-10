@@ -1493,6 +1493,15 @@
   opacity: 0.35;
   margin-top: 0.3rem;
 }
+/* 署名行（— 作者 — / — 《作品名》 —）超长单行省略截断，与诗句同策略 */
+.pc-poem-hint .pc-poem-author {
+  display: inline-block;
+  max-width: min(60vw, 46ch);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 .bm-add {
   display: flex;
   flex-direction: column;
@@ -2483,3 +2492,102 @@
   max-height: 260px;
   overflow-y: auto;
 }
+
+/* ===== 词库管理（设置 → 词库管理） ===== */
+.plm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.plm-form {
+  display: flex;
+  gap: 0.35rem;
+}
+.plm-form .plm-in-content { flex: 1 1 56%; min-width: 0; }
+.plm-form .plm-in { flex: 1 1 17%; min-width: 0; }
+.plm-add { white-space: nowrap; }
+.plm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.plm-search { width: 11rem; }
+.plm-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  border-radius: 0.55rem;
+}
+.plm-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.plm-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-base-100);
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  font-weight: 600;
+  opacity: 0.75;
+}
+.plm-table td {
+  padding: 0.26rem 0.5rem;
+  border-top: 1px solid color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  vertical-align: middle;
+}
+.plm-col-content { width: 46%; }
+.plm-col-author { width: 16%; }
+.plm-col-source { width: 20%; }
+.plm-col-acts { width: 18%; }
+.plm-cell {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plm-row-hidden .plm-cell { opacity: 0.4; }
+.plm-tag {
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  opacity: 0.55;
+}
+.plm-acts { text-align: right; white-space: nowrap; }
+.plm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.7rem;
+  padding: 0 0.55rem;
+  margin-left: 0.25rem;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  border-radius: 0.45rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.plm-btn:hover {
+  border-color: color-mix(in oklab, var(--color-primary) 50%, transparent);
+  color: var(--color-primary);
+}
+.plm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.plm-btn:first-child { margin-left: 0; }
+.plm-edit-in { width: 100%; min-width: 0; height: 1.8rem; font-size: 0.76rem; }
+.plm-empty {
+  text-align: center;
+  padding: 0.9rem 0;
+  opacity: 0.5;
+}
+.plm-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+}
+.plm-tip { opacity: 0.7; font-size: 0.76rem; }

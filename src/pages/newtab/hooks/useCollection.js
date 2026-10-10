@@ -8,6 +8,12 @@ import {
   reorderItem,
   genId,
   SETTINGS_DEFAULTS,
+  POEM_LIB_DEFAULTS,
+  normalizePoemLib,
+  addCustomPoem,
+  updatePoemEntry,
+  removeCustomPoem,
+  setPoemHidden as setPoemHiddenSvc,
 } from "../services/collection";
 import { countLinks, mergeImportedTree } from "../services/bookmarks";
 
@@ -49,7 +55,6 @@ const CACHE_KEY = "pt.cache";
 const SAVE_DEBOUNCE = 3000; // 快层：编辑静止后 3s 落库
 const SAVE_MAX_WAIT = 30000; // 快层：持续编辑期间最长 30s 强制落库一次
 const SAVE_LAZY_DEBOUNCE = 300000; // 慢通道：仅懒修改在途时 5 分钟兜底落库
-const GET_FRESH_MS = 600000; // 启动新鲜窗：缓存 10 分钟内有活动则跳过启动校验
 const ITER_DEFAULT = 600000;
 const FETCH_TIMEOUT = 15000; // 网络请求超时：避免挂死在 saving/boot
 
@@ -149,6 +154,7 @@ function defaultData() {
     todoWidgets: [],
     historyWidgets: [],
     settings: { ...SETTINGS_DEFAULTS },
+    poemLib: { ...POEM_LIB_DEFAULTS, edits: {} },
     layout: { v: 2, cols: [[], [], [], [], []] },
   };
 }
@@ -176,6 +182,7 @@ function ensureShape(d) {
     iframeWidgets: normList(d.iframeWidgets),
     todoWidgets: normList(d.todoWidgets),
     historyWidgets: normList(d.historyWidgets),
+    poemLib: normalizePoemLib(d.poemLib),
     layout: d.layout ?? { v: 2, cols: [[], [], [], [], []] },
     settings,
   };
@@ -365,9 +372,10 @@ export function useCollection() {
     let alive = true;
     (async () => {
       const cached = cachedBoot.current;
-      /* 启动新鲜窗：缓存近期有过活动（读云/编辑/广播采纳）则信任本地、跳过启动校验省请求。
-         云端若已被其他设备推进，首次保存携旧版本号会 409 → 强制仲裁兜底，不存在静默覆盖 */
-      if (cached && Date.now() - (cached.fetchedAt || 0) < GET_FRESH_MS) {
+      /* 启动新鲜窗（settings.syncFreq，默认 10 分钟）：缓存近期有过活动（读云/编辑/广播采纳）则信任本地、
+         跳过启动校验省请求。云端若已被其他设备推进，首次保存携旧版本号会 409 → 强制仲裁兜底，不存在静默覆盖 */
+      const freshMs = Math.max(1, Math.min(1440, Number(cached?.data?.settings?.syncFreq) || 10)) * 60000;
+      if (cached && Date.now() - (cached.fetchedAt || 0) < freshMs) {
         dirtyRef.current = !!cached.dirty;
         baseSavedAtRef.current = cached.savedAt || "";
         setSavedAt(cached.savedAt || "");
@@ -759,6 +767,12 @@ export function useCollection() {
   /** opts.lazy：低频且不急的设置项（如卡片显隐）可走慢通道；常规设置不传保持快层 */
   const setSettings = useCallback((patch, opts) => mutate((d) => ({ ...d, settings: { ...SETTINGS_DEFAULTS, ...d.settings, ...patch } }), opts), [mutate]);
 
+  /* ---------- 词库（poemLib）：增删改随词库管理面板，走快层自动保存；修改 rev+1 驱动轮播重洗 ---------- */
+  const addPoem = useCallback((entry) => mutate((d) => addCustomPoem(d, entry)), [mutate]);
+  const updatePoem = useCallback((uuid, patch) => mutate((d) => updatePoemEntry(d, uuid, patch)), [mutate]);
+  const removePoem = useCallback((uuid) => removeWithUndo("已删除词条", () => mutate((d) => removeCustomPoem(d, uuid))), [mutate, removeWithUndo]);
+  const setPoemHidden = useCallback((uuid, hidden) => mutate((d) => setPoemHiddenSvc(d, uuid, hidden)), [mutate]);
+
   return {
     uid, hasUid, data, status, error, saveState, savedAt, oversize,
     login, register, reload, saveNow, logout,
@@ -769,6 +783,7 @@ export function useCollection() {
     addTodo, removeTodo, updateTodo,
     addHistory, removeHistory, updateHistory,
     setLayout, setSettings,
+    addPoem, updatePoem, removePoem, setPoemHidden,
     undoInfo, undoRemove, dismissUndo,
   };
 }

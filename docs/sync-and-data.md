@@ -63,7 +63,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 
 **核心不变量：仲裁完成前不存在任何静默覆盖云端的路径；本地未同步修改不丢。**
 
-**启动新鲜窗**：打开新标签页时，若缓存 10 分钟内有过活动（`fetchedAt`）则**跳过启动校验**直接用缓存（省 Workers 请求配额）；云端若已被推进，首次保存携旧版本号 → 409 → 强制仲裁兜底，下表「启动恢复」各行在新鲜窗命中时顺延到首次保存时发生。
+**启动新鲜窗**：打开新标签页时，若缓存在「启动校验频率」（settings.syncFreq，默认 10 分钟）内有过活动（`fetchedAt`）则**跳过启动校验**直接用缓存（省 Workers 请求配额）；云端若已被推进，首次保存携旧版本号 → 409 → 强制仲裁兜底，下表「启动恢复」各行在新鲜窗命中时顺延到首次保存时发生。
 
 | 场景 | 行为 |
 |---|---|
@@ -108,7 +108,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 | `GET /api/data` | 会话 | — | 支持 `If-None-Match` → 304 |
 | `PUT /api/data` | 会话 | — | ≤8MB 请求体，超限 **413**；`X-Base-SavedAt` 乐观锁（R2 CAS 原子） |
 | `GET /api/favicon?domain=` | 无 | 600 | 图标代理：Google s2 → DDG 兜底，R2 缓存 30 天；浏览器缓存命中 30 天、404 负缓存 1 天（重复打开零请求） |
-| `GET /api/title?url=` | 无 | 120 | 网页标题代理：读前 256KB、10s 超时、R2 缓存 30 天 |
+| `GET /api/title?url=` | 无 | 120 | 网页标题代理：读前 256KB、10s 超时、R2 缓存 30 天；浏览器缓存命中 7 天、404 负缓存 1 天 |
 | `GET /api/health` | 无 | — | 存活探测 |
 
 ## 六、数据结构（云端 `pt/data/<uid>.json` 的 `data` 字段）
@@ -125,6 +125,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 | `todoWidgets` | TodoWidget[] | `[]` | 待办清单卡 |
 | `historyWidgets` | HistoryWidget[] | `[]` | 浏览历史卡（仅卡片实例；历史数据仅本机读取，不入云） |
 | `settings` | Settings | 见下表 | 随账号同步的偏好 |
+| `poemLib` | PoemLib | `{custom:[],hidden:[],edits:{},rev:0}` | 用户词库修改（自定义词条 / 隐藏的内置词条 / 内置词条覆盖编辑），见下节 |
 | `layout` | Layout | `{v:2, cols:[[],[],[],[],[]]}` | 布局，固定 5 槽位 |
 
 - `Folder = { id: "f_*", title, children: (Bookmark|Folder)[] }`；`Bookmark = { id: "b_*", title, url, favicon?, dateAdded }`
@@ -132,6 +133,16 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 - `TodoWidget = { id: "td_*", title, items: TodoItem[] }`；`TodoItem = { id: "ti_*", text, done, createdAt }`。条目**存储顺序**与显示无关：显示时未完成在前、已完成在后（各自保持存储序，即「完成沉底」）；卡内拖拽排序只重排未完成组
 - `HistoryWidget = { id: "wh_*", title, h? }`；`h` = 卡片高度像素（缺省内容自适应、列表 420px 内滚，可设 200-2000，设定后列表填满剩余空间）。**仅卡片实例入云**：历史记录经 `chrome.history` 在本机实时读取展示（扩展版），任何浏览记录都不写入云端 data
 - 结构上 Folder 可嵌套任意层（书签导入可产生任意深度）；UI 只创建/展示「分组 + 一级子分组」两级，更深层经浏览浮层只读查看
+
+### poemLib（用户词库）
+
+- `PoemLib = { custom: PoemEntry[], hidden: string[], edits: { [uuid]: PoemPatch }, rev: number }`
+- `PoemEntry = { uuid: "u_*", cat: <12 类 key>, content, author, source }`；`content` 必填非空，`author`/`source` 可为空字符串（`u_` 前缀保证不与内置 UUID 冲突）
+- **内置语料只读**：删除内置词条 = 把 uuid 写入 `hidden`（可随时恢复）；修改内置词条 = 把三字段整值写入 `edits[uuid]` 覆盖显示，原始语料不变、语料包升级后覆盖仍生效。自定义词条的增删改直接作用于 `custom`
+- `rev` 每次词库修改 +1：诗词引擎据此感知变化并重新洗牌（新增 / 删除 / 隐藏 / 恢复会改变轮播集合）
+- **轮播合并规则**（`contentEngine.getContentByCategories`）：内置列表 → 剔除 `hidden` → 命中 `edits` 的按三字段覆盖 → 追加已启用分类的自定义词条；再经与内置相同的去重规则（内容相同只保留一条）
+- 归一：`ensureShape` 经 `normalizePoemLib` 兜底——非数组/畸形条目剔除、字段取字符串、`content` 为空的词条丢弃
+- Worker 不解释该字段（不透明 JSON，顶层只校验 `folders`）；体积受整份 8MB 上限约束
 
 ### settings
 
@@ -144,6 +155,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 | `poemSpace` | `0` | 0-600（px，0 = 自然高度，诗词区内垂直居中） |
 | `pageBgLight` / `pageBgDark` | `""` | `#RGB`/`#RRGGBB`（空 = 主题默认；浅色/深色主题各自独立配色） |
 | `hiddenCards` | `[]` | 隐藏的卡片 id（`"f:xxx"` / `"w:xxx"` / `"t:xxx"` / `"h:xxx"`） |
+| `syncFreq` | `10` | 启动校验频率（分钟）：`10` / `30` / `60`——开新标签页时超过该间隔才向云端校验一次 |
 
 ### 布局语义
 
@@ -160,7 +172,7 @@ PUT 必须携带客户端所知的版本（`X-Base-SavedAt`）；服务端用 **
 ## 七、已知边界（设计取舍）
 
 - 同步为**整份覆盖**模型（无字段级合并）——多设备冲突只能整份二选一，由强制仲裁兜底
-- **启动新鲜窗内不校验云端**（10 分钟）：其他设备的修改最迟约 10 分钟后可见（或设置面板「从云端恢复」手动拉取）；期间的跨设备冲突由首次保存的 409 强制仲裁兜底，不丢数据、不静默覆盖
+- **启动新鲜窗内不校验云端**（间隔 = settings.syncFreq，默认 10 分钟）：其他设备的修改最迟一个间隔后可见（或设置面板「从云端恢复」手动拉取）；期间的跨设备冲突由首次保存的 409 强制仲裁兜底，不丢数据、不静默覆盖
 - 会话令牌不可吊销、无改密码
 - 单份数据 ≤8MB（请求体）；客户端不做预检，超限按 §二「413」行为处理
 - favicon/title 代理对任意公网站点抓取（仅读 title 标签 / 图标，不执行内容）；私有网络地址经 Cloudflare 边缘不可达；代理缓存无总量上限（写入速率受每 IP 限流约束，个人规模存量可忽略；如需硬上界，可在部署机为 `pt/favicons/`、`pt/titles/` 前缀配置 R2 lifecycle 过期规则，零代码）
